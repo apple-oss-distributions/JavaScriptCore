@@ -2,7 +2,7 @@
 /*
  *  This file is part of the KDE libraries
  *  Copyright (C) 1999-2000 Harri Porten (porten@kde.org)
- *  Copyright (C) 2004 Apple Computer, Inc.
+ *  Copyright (C) 2003 Apple Computer, Inc.
  *
  *  This library is free software; you can redistribute it and/or
  *  modify it under the terms of the GNU Library General Public
@@ -16,63 +16,48 @@
  *
  *  You should have received a copy of the GNU Library General Public License
  *  along with this library; see the file COPYING.LIB.  If not, write to
- *  the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- *  Boston, MA 02110-1301, USA.
+ *  the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ *  Boston, MA 02111-1307, USA.
  *
  */
 
-#include "config.h"
-#include "ustring.h"
+#ifdef HAVE_CONFIG_H
+#include <config.h>
+#endif
 
-#include <assert.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <ctype.h>
-#if HAVE(STRING_H)
+#ifdef HAVE_STRING_H
 #include <string.h>
 #endif
-#if HAVE(STRINGS_H)
+#ifdef HAVE_STRINGS_H
 #include <strings.h>
 #endif
 
+#include "ustring.h"
 #include "operations.h"
 #include "identifier.h"
 #include <math.h>
 #include "dtoa.h"
 
-#include <wtf/Vector.h>
-
-using std::max;
-
 namespace KJS {
+  extern const double NaN;
+  extern const double Inf;
+};
 
-extern const double NaN;
-extern const double Inf;
+using namespace KJS;
 
 CString::CString(const char *c)
 {
-  length = strlen(c);
-  data = new char[length+1];
-  memcpy(data, c, length + 1);
-}
-
-CString::CString(const char *c, size_t len)
-{
-  length = len;
-  data = new char[len+1];
-  memcpy(data, c, len);
-  data[len] = 0;
+  data = new char[strlen(c)+1];
+  strcpy(data, c);
 }
 
 CString::CString(const CString &b)
 {
-  length = b.length;
-  if (b.data) {
-    data = new char[length+1];
-    memcpy(data, b.data, length + 1);
-  }
-  else
-    data = 0;
+  data = new char[b.size()+1];
+  strcpy(data, b.c_str());
 }
 
 CString::~CString()
@@ -83,13 +68,14 @@ CString::~CString()
 CString &CString::append(const CString &t)
 {
   char *n;
-  n = new char[length+t.length+1];
-  if (length)
-    memcpy(n, data, length);
-  if (t.length)
-    memcpy(n+length, t.data, t.length);
-  length += t.length;
-  n[length] = 0;
+  if (data) {
+    n = new char[strlen(data)+t.size()+1];
+    strcpy(n, data);
+  } else {
+    n = new char[t.size()+1];
+    n[0] = '\0';
+  }
+  strcat(n, t.c_str());
 
   delete [] data;
   data = n;
@@ -101,9 +87,8 @@ CString &CString::operator=(const char *c)
 {
   if (data)
     delete [] data;
-  length = strlen(c);
-  data = new char[length+1];
-  memcpy(data, c, length + 1);
+  data = new char[strlen(c)+1];
+  strcpy(data, c);
 
   return *this;
 }
@@ -115,117 +100,80 @@ CString &CString::operator=(const CString &str)
 
   if (data)
     delete [] data;
-  length = str.length;
-  if (str.data) {
-    data = new char[length + 1];
-    memcpy(data, str.data, length + 1);
-  }
-  else
-    data = 0;
+  data = new char[str.size()+1];
+  strcpy(data, str.c_str());
 
   return *this;
 }
 
-bool operator==(const CString& c1, const CString& c2)
+int CString::size() const
 {
-  size_t len = c1.size();
-  return len == c2.size() && (len == 0 || memcmp(c1.c_str(), c2.c_str(), len) == 0);
+  return strlen(data);
 }
 
-// Hack here to avoid a global with a constructor; point to an unsigned short instead of a UChar.
-static unsigned short almostUChar;
-UString::Rep UString::Rep::null = { 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0 };
-UString::Rep UString::Rep::empty = { 0, 0, 1, 0, 0, 0, reinterpret_cast<UChar*>(&almostUChar), 0, 0, 0, 0 };
+bool KJS::operator==(const KJS::CString& c1, const KJS::CString& c2)
+{
+  return (strcmp(c1.c_str(), c2.c_str()) == 0);
+}
+
+UString::Rep UString::Rep::null = { 0, 0, 0, 1, 1 };
+UString::Rep UString::Rep::empty = { 0, 0, 0, 1, 1 };
 const int normalStatBufferSize = 4096;
 static char *statBuffer = 0;
 static int statBufferSize = 0;
 
+UChar UChar::toLower() const
+{
+  // ### properly support unicode tolower
+  if (uc >= 256 || islower(uc))
+    return *this;
+
+  return (unsigned char)tolower(uc);
+}
+
+UChar UChar::toUpper() const
+{
+  if (uc >= 256 || isupper(uc))
+    return *this;
+
+  return (unsigned char)toupper(uc);
+}
+
 UCharReference& UCharReference::operator=(UChar c)
 {
-  str->copyForWriting();
-  if (offset < str->rep()->len)
-    *(str->rep()->data() + offset) = c;
+  str->detach();
+  if (offset < str->rep->len)
+    *(str->rep->dat + offset) = c;
   /* TODO: lengthen string ? */
   return *this;
 }
 
 UChar& UCharReference::ref() const
 {
-  if (offset < str->rep()->len)
-    return *(str->rep()->data() + offset);
+  if (offset < str->rep->len)
+    return *(str->rep->dat + offset);
   else {
     static UChar callerBetterNotModifyThis('\0');
     return callerBetterNotModifyThis;
   }
 }
 
-PassRefPtr<UString::Rep> UString::Rep::createCopying(const UChar *d, int l)
-{
-  int sizeInBytes = l * sizeof(UChar);
-  UChar *copyD = static_cast<UChar *>(fastMalloc(sizeInBytes));
-  memcpy(copyD, d, sizeInBytes);
-
-  return create(copyD, l);
-}
-
-PassRefPtr<UString::Rep> UString::Rep::create(UChar *d, int l)
+UString::Rep *UString::Rep::create(UChar *d, int l)
 {
   Rep *r = new Rep;
-  r->offset = 0;
+  r->dat = d;
   r->len = l;
-  r->rc = 1;
-  r->_hash = 0;
-  r->isIdentifier = 0;
-  r->baseString = 0;
-  r->buf = d;
-  r->usedCapacity = l;
   r->capacity = l;
-  r->usedPreCapacity = 0;
-  r->preCapacity = 0;
-
-  // steal the single reference this Rep was created with
-  return adoptRef(r);
-}
-
-PassRefPtr<UString::Rep> UString::Rep::create(PassRefPtr<Rep> base, int offset, int length)
-{
-  assert(base);
-
-  int baseOffset = base->offset;
-
-  if (base->baseString) {
-    base = base->baseString;
-  }
-
-  assert(-(offset + baseOffset) <= base->usedPreCapacity);
-  assert(offset + baseOffset + length <= base->usedCapacity);
-
-  Rep *r = new Rep;
-  r->offset = baseOffset + offset;
-  r->len = length;
   r->rc = 1;
   r->_hash = 0;
-  r->isIdentifier = 0;
-  r->baseString = base.release();
-  r->buf = 0;
-  r->usedCapacity = 0;
-  r->capacity = 0;
-  r->usedPreCapacity = 0;
-  r->preCapacity = 0;
-
-  // steal the single reference this Rep was created with
-  return adoptRef(r);
+  return r;
 }
 
 void UString::Rep::destroy()
 {
-  if (isIdentifier)
+  if (capacity == capacityForIdentifier)
     Identifier::remove(this);
-  if (baseString) {
-    baseString->deref();
-  } else {
-    fastFree(buf);
-  }
+  delete [] dat;
   delete this;
 }
 
@@ -233,275 +181,160 @@ void UString::Rep::destroy()
 // or anything like that.
 const unsigned PHI = 0x9e3779b9U;
 
-// Paul Hsieh's SuperFastHash
-// http://www.azillionmonkeys.com/qed/hash.html
-unsigned UString::Rep::computeHash(const UChar *s, int len)
+// This hash algorithm comes from:
+// http://burtleburtle.net/bob/hash/hashfaq.html
+// http://burtleburtle.net/bob/hash/doobs.html
+unsigned UString::Rep::computeHash(const UChar *s, int length)
 {
-  unsigned l = len;
-  uint32_t hash = PHI;
-  uint32_t tmp;
+    int prefixLength = length < 8 ? length : 8;
+    int suffixPosition = length < 16 ? 8 : length - 8;
 
-  int rem = l & 1;
-  l >>= 1;
+    unsigned h = PHI;
+    h += length;
+    h += (h << 10); 
+    h ^= (h << 6); 
 
-  // Main loop
-  for (; l > 0; l--) {
-    hash += s[0].uc;
-    tmp = (s[1].uc << 11) ^ hash;
-    hash = (hash << 16) ^ tmp;
-    s += 2;
-    hash += hash >> 11;
-  }
+    for (int i = 0; i < prefixLength; i++) {
+        h += s[i].uc; 
+	h += (h << 10); 
+	h ^= (h << 6); 
+    }
+    for (int i = suffixPosition; i < length; i++){
+        h += s[i].uc; 
+	h += (h << 10); 
+	h ^= (h << 6); 
+    }
 
-  // Handle end case
-  if (rem) {
-    hash += s[0].uc;
-    hash ^= hash << 11;
-    hash += hash >> 17;
-  }
+    h += (h << 3);
+    h ^= (h >> 11);
+    h += (h << 15);
+ 
+    if (h == 0)
+        h = 0x80000000;
 
-  // Force "avalanching" of final 127 bits
-  hash ^= hash << 3;
-  hash += hash >> 5;
-  hash ^= hash << 2;
-  hash += hash >> 15;
-  hash ^= hash << 10;
-
-  // this avoids ever returning a hash code of 0, since that is used to
-  // signal "hash not computed yet", using a value that is likely to be
-  // effectively the same as 0 when the low bits are masked
-  if (hash == 0)
-    hash = 0x80000000;
-
-  return hash;
+    return h;
 }
 
-// Paul Hsieh's SuperFastHash
-// http://www.azillionmonkeys.com/qed/hash.html
+// This hash algorithm comes from:
+// http://burtleburtle.net/bob/hash/hashfaq.html
+// http://burtleburtle.net/bob/hash/doobs.html
 unsigned UString::Rep::computeHash(const char *s)
 {
-  // This hash is designed to work on 16-bit chunks at a time. But since the normal case
-  // (above) is to hash UTF-16 characters, we just treat the 8-bit chars as if they
-  // were 16-bit chunks, which should give matching results
+    int length = strlen(s);
+    int prefixLength = length < 8 ? length : 8;
+    int suffixPosition = length < 16 ? 8 : length - 8;
 
-  uint32_t hash = PHI;
-  uint32_t tmp;
-  unsigned l = strlen(s);
-  
-  int rem = l & 1;
-  l >>= 1;
+    unsigned h = PHI;
+    h += length;
+    h += (h << 10); 
+    h ^= (h << 6); 
 
-  // Main loop
-  for (; l > 0; l--) {
-    hash += (unsigned char)s[0];
-    tmp = ((unsigned char)s[1] << 11) ^ hash;
-    hash = (hash << 16) ^ tmp;
-    s += 2;
-    hash += hash >> 11;
-  }
+    for (int i = 0; i < prefixLength; i++) {
+        h += (unsigned char)s[i];
+	h += (h << 10); 
+	h ^= (h << 6); 
+    }
+    for (int i = suffixPosition; i < length; i++) {
+        h += (unsigned char)s[i];
+	h += (h << 10); 
+	h ^= (h << 6); 
+    }
 
-  // Handle end case
-  if (rem) {
-    hash += (unsigned char)s[0];
-    hash ^= hash << 11;
-    hash += hash >> 17;
-  }
+    h += (h << 3);
+    h ^= (h >> 11);
+    h += (h << 15);
 
-  // Force "avalanching" of final 127 bits
-  hash ^= hash << 3;
-  hash += hash >> 5;
-  hash ^= hash << 2;
-  hash += hash >> 15;
-  hash ^= hash << 10;
-  
-  // this avoids ever returning a hash code of 0, since that is used to
-  // signal "hash not computed yet", using a value that is likely to be
-  // effectively the same as 0 when the low bits are masked
-  if (hash == 0)
-    hash = 0x80000000;
+    if (h == 0)
+        h = 0x80000000;
 
-  return hash;
+    return h;
 }
 
-// put these early so they can be inlined
-inline int UString::expandedSize(int size, int otherSize) const
+UString::UString()
 {
-  int s = (size * 11 / 10) + 1 + otherSize;
-  return s;
+  attach(&Rep::null);
 }
-
-inline int UString::usedCapacity() const
-{
-  return m_rep->baseString ? m_rep->baseString->usedCapacity : m_rep->usedCapacity;
-}
-
-inline int UString::usedPreCapacity() const
-{
-  return m_rep->baseString ? m_rep->baseString->usedPreCapacity : m_rep->usedPreCapacity;
-}
-
-void UString::expandCapacity(int requiredLength)
-{
-  Rep *r = m_rep->baseString ? m_rep->baseString : rep();
-
-  if (requiredLength > r->capacity) {
-    int newCapacity = expandedSize(requiredLength, r->preCapacity);
-    r->buf = static_cast<UChar *>(fastRealloc(r->buf, newCapacity * sizeof(UChar)));
-    r->capacity = newCapacity - r->preCapacity;
-  }
-  if (requiredLength > r->usedCapacity) {
-    r->usedCapacity = requiredLength;
-  }
-}
-
-void UString::expandPreCapacity(int requiredPreCap)
-{
-  Rep *r = m_rep->baseString ? m_rep->baseString : rep();
-
-  if (requiredPreCap > r->preCapacity) {
-    int newCapacity = expandedSize(requiredPreCap, r->capacity);
-    int delta = newCapacity - r->capacity - r->preCapacity;
-
-    UChar *newBuf = static_cast<UChar *>(fastMalloc(newCapacity * sizeof(UChar)));
-    memcpy(newBuf + delta, r->buf, (r->capacity + r->preCapacity) * sizeof(UChar));
-    fastFree(r->buf);
-    r->buf = newBuf;
-
-    r->preCapacity = newCapacity - r->capacity;
-  }
-  if (requiredPreCap > r->usedPreCapacity) {
-    r->usedPreCapacity = requiredPreCap;
-  }
-}
-
 
 UString::UString(char c)
 {
-    UChar *d = static_cast<UChar *>(fastMalloc(sizeof(UChar)));
+    UChar *d = new UChar[1];
     d[0] = c;
-    m_rep = Rep::create(d, 1);
+    rep = Rep::create(d, 1);
 }
 
 UString::UString(const char *c)
 {
   if (!c) {
-    m_rep = &Rep::null;
+    attach(&Rep::null);
     return;
   }
   int length = strlen(c);
   if (length == 0) {
-    m_rep = &Rep::empty;
+    attach(&Rep::empty);
     return;
   }
-  UChar *d = static_cast<UChar *>(fastMalloc(sizeof(UChar) * length));
+  UChar *d = new UChar[length];
   for (int i = 0; i < length; i++)
     d[i].uc = c[i];
-  m_rep = Rep::create(d, length);
+  rep = Rep::create(d, length);
 }
 
 UString::UString(const UChar *c, int length)
 {
-  if (length == 0) 
-    m_rep = &Rep::empty;
-  else
-    m_rep = Rep::createCopying(c, length);
+  if (length == 0) {
+    attach(&Rep::empty);
+    return;
+  }
+  UChar *d = new UChar[length];
+  memcpy(d, c, length * sizeof(UChar));
+  rep = Rep::create(d, length);
 }
 
 UString::UString(UChar *c, int length, bool copy)
 {
-  if (length == 0)
-    m_rep = &Rep::empty;
-  else if (copy)
-    m_rep = Rep::createCopying(c, length);
-  else
-    m_rep = Rep::create(c, length);
+  if (length == 0) {
+    attach(&Rep::empty);
+    return;
+  }
+  UChar *d;
+  if (copy) {
+    d = new UChar[length];
+    memcpy(d, c, length * sizeof(UChar));
+  } else
+    d = c;
+  rep = Rep::create(d, length);
 }
 
 UString::UString(const UString &a, const UString &b)
 {
   int aSize = a.size();
-  int aOffset = a.m_rep->offset;
   int bSize = b.size();
-  int bOffset = b.m_rep->offset;
   int length = aSize + bSize;
-
-  // possible cases:
- 
-  if (aSize == 0) {
-    // a is empty
-    m_rep = b.m_rep;
-  } else if (bSize == 0) {
-    // b is empty
-    m_rep = a.m_rep;
-  } else if (aOffset + aSize == a.usedCapacity() && 4 * aSize >= bSize &&
-	     (-bOffset != b.usedPreCapacity() || aSize >= bSize)) {
-    // - a reaches the end of its buffer so it qualifies for shared append
-    // - also, it's at least a quarter the length of b - appending to a much shorter
-    //   string does more harm than good
-    // - however, if b qualifies for prepend and is longer than a, we'd rather prepend
-    UString x(a);
-    x.expandCapacity(aOffset + length);
-    memcpy(const_cast<UChar *>(a.data() + aSize), b.data(), bSize * sizeof(UChar));
-    m_rep = Rep::create(a.m_rep, 0, length);
-  } else if (-bOffset == b.usedPreCapacity() && 4 * bSize >= aSize) {
-    // - b reaches the beginning of its buffer so it qualifies for shared prepend
-    // - also, it's at least a quarter the length of a - prepending to a much shorter
-    //   string does more harm than good
-    UString y(b);
-    y.expandPreCapacity(-bOffset + aSize);
-    memcpy(const_cast<UChar *>(b.data() - aSize), a.data(), aSize * sizeof(UChar));
-    m_rep = Rep::create(b.m_rep, -aSize, length);
-  } else {
-    // a does not qualify for append, and b does not qualify for prepend, gotta make a whole new string
-    int newCapacity = expandedSize(length, 0);
-    UChar *d = static_cast<UChar *>(fastMalloc(sizeof(UChar) * newCapacity));
-    memcpy(d, a.data(), aSize * sizeof(UChar));
-    memcpy(d + aSize, b.data(), bSize * sizeof(UChar));
-    m_rep = Rep::create(d, length);
-    m_rep->capacity = newCapacity;
+  if (length == 0) {
+    attach(&Rep::empty);
+    return;
   }
+  UChar *d = new UChar[length];
+  memcpy(d, a.data(), aSize * sizeof(UChar));
+  memcpy(d + aSize, b.data(), bSize * sizeof(UChar));
+  rep = Rep::create(d, length);
 }
 
 const UString &UString::null()
 {
-  static UString n;
-  return n;
+    static UString n;
+    return n;
 }
 
 UString UString::from(int i)
 {
-  UChar buf[1 + sizeof(i) * 3];
-  UChar *end = buf + sizeof(buf) / sizeof(UChar);
-  UChar *p = end;
-  
-  if (i == 0) {
-    *--p = '0';
-  } else if (i == INT_MIN) {
-    char minBuf[1 + sizeof(i) * 3];
-    snprintf(minBuf, 1 + sizeof(i) * 3, "%d", INT_MIN);
-    return UString(minBuf);
-  } else {
-    bool negative = false;
-    if (i < 0) {
-      negative = true;
-      i = -i;
-    }
-    while (i) {
-      *--p = (unsigned short)((i % 10) + '0');
-      i /= 10;
-    }
-    if (negative) {
-      *--p = '-';
-    }
-  }
-  
-  return UString(p, end - p);
+  return from((long)i);
 }
 
 UString UString::from(unsigned int u)
 {
-  UChar buf[sizeof(u) * 3];
-  UChar *end = buf + sizeof(buf) / sizeof(UChar);
+  UChar buf[20];
+  UChar *end = buf + 20;
   UChar *p = end;
   
   if (u == 0) {
@@ -518,15 +351,15 @@ UString UString::from(unsigned int u)
 
 UString UString::from(long l)
 {
-  UChar buf[1 + sizeof(l) * 3];
-  UChar *end = buf + sizeof(buf) / sizeof(UChar);
+  UChar buf[20];
+  UChar *end = buf + 20;
   UChar *p = end;
   
   if (l == 0) {
     *--p = '0';
   } else if (l == LONG_MIN) {
-    char minBuf[1 + sizeof(l) * 3];
-    snprintf(minBuf, 1 + sizeof(l) * 3, "%ld", LONG_MIN);
+    char minBuf[20];
+    sprintf(minBuf, "%ld", LONG_MIN);
     return UString(minBuf);
   } else {
     bool negative = false;
@@ -548,12 +381,7 @@ UString UString::from(long l)
 
 UString UString::from(double d)
 {
-  // avoid ever printing -NaN, in JS conceptually there is only one NaN value
-  if (isNaN(d))
-    return "NaN";
-
-  int buflength= 80;
-  char buf[buflength];
+  char buf[80];
   int decimalPoint;
   int sign;
   
@@ -571,29 +399,28 @@ UString UString::from(double d)
     for (int j = decimalPoint; j < 0; j++) {
       buf[i++] = '0';
     }
-    strlcpy(buf + i, result, buflength - i);
+    strcpy(buf + i, result);
   } else if (decimalPoint <= 21 && decimalPoint > 0) {
     if (length <= decimalPoint) {
-      strlcpy(buf + i, result, buflength - i);
+      strcpy(buf + i, result);
       i += length;
       for (int j = 0; j < decimalPoint - length; j++) {
 	buf[i++] = '0';
       }
       buf[i] = '\0';
     } else {
-      int len = (decimalPoint <= buflength - i ? decimalPoint : buflength - i);
-      strncpy(buf + i, result, len);
-      i += len;
+      strncpy(buf + i, result, decimalPoint);
+      i += decimalPoint;
       buf[i++] = '.';
-      strlcpy(buf + i, result + decimalPoint, buflength - i);
+      strcpy(buf + i, result + decimalPoint);
     }
   } else if (result[0] < '0' || result[0] > '9') {
-    strlcpy(buf + i, result, buflength - i);
+    strcpy(buf + i, result);
   } else {
     buf[i++] = result[0];
     if (length > 1) {
       buf[i++] = '.';
-      strlcpy(buf + i, result + 1, buflength - i);
+      strcpy(buf + i, result + 1);
       i += length - 1;
     }
     
@@ -613,7 +440,6 @@ UString UString::from(double d)
     }
     buf[i++] = '0' + exponential % 10;
     buf[i++] = '\0';
-    assert(i <= buflength);
   }
   
   kjs_freedtoa(result);
@@ -621,151 +447,25 @@ UString UString::from(double d)
   return UString(buf);
 }
 
-UString UString::spliceSubstringsWithSeparators(const Range *substringRanges, int rangeCount, const UString *separators, int separatorCount) const
-{
-  int totalLength = 0;
-
-  for (int i = 0; i < rangeCount; i++) {
-    totalLength += substringRanges[i].length;
-  }
-  for (int i = 0; i < separatorCount; i++) {
-    totalLength += separators[i].size();
-  }
-
-  UChar *buffer = static_cast<UChar *>(fastMalloc(totalLength * sizeof(UChar)));
-
-  int maxCount = max(rangeCount, separatorCount);
-  int bufferPos = 0;
-  for (int i = 0; i < maxCount; i++) {
-    if (i < rangeCount) {
-      memcpy(buffer + bufferPos, data() + substringRanges[i].position, substringRanges[i].length * sizeof(UChar));
-      bufferPos += substringRanges[i].length;
-    }
-    if (i < separatorCount) {
-      memcpy(buffer + bufferPos, separators[i].data(), separators[i].size() * sizeof(UChar));
-      bufferPos += separators[i].size();
-    }
-  }
-
-  return UString(UString::Rep::create(buffer, totalLength));
-}
-
-
-
 UString &UString::append(const UString &t)
 {
-  int thisSize = size();
-  int thisOffset = m_rep->offset;
-  int tSize = t.size();
-  int length = thisSize + tSize;
-
-  // possible cases:
-  if (thisSize == 0) {
-    // this is empty
-    *this = t;
-  } else if (tSize == 0) {
-    // t is empty
-  } else if (!m_rep->baseString && m_rep->rc == 1) {
-    // this is direct and has refcount of 1 (so we can just alter it directly)
-    expandCapacity(thisOffset + length);
-    memcpy(const_cast<UChar *>(data() + thisSize), t.data(), tSize * sizeof(UChar));
-    m_rep->len = length;
-    m_rep->_hash = 0;
-  } else if (thisOffset + thisSize == usedCapacity()) {
-    // this reaches the end of the buffer - extend it
-    expandCapacity(thisOffset + length);
-    memcpy(const_cast<UChar *>(data() + thisSize), t.data(), tSize * sizeof(UChar));
-    m_rep = Rep::create(m_rep, 0, length);
-  } else {
-    // this is shared with someone using more capacity, gotta make a whole new string
-    int newCapacity = expandedSize(length, 0);
-    UChar *d = static_cast<UChar *>(fastMalloc(sizeof(UChar) * newCapacity));
-    memcpy(d, data(), thisSize * sizeof(UChar));
-    memcpy(const_cast<UChar *>(d + thisSize), t.data(), tSize * sizeof(UChar));
-    m_rep = Rep::create(d, length);
-    m_rep->capacity = newCapacity;
+  int l = size();
+  int tLen = t.size();
+  int newLen = l + tLen;
+  if (rep->rc == 1 && newLen <= rep->capacity) {
+    memcpy(rep->dat+l, t.data(), tLen * sizeof(UChar));
+    rep->len = newLen;
+    rep->_hash = 0;
+    return *this;
   }
-
-  return *this;
-}
-
-UString &UString::append(const char *t)
-{
-  int thisSize = size();
-  int thisOffset = m_rep->offset;
-  int tSize = strlen(t);
-  int length = thisSize + tSize;
-
-  // possible cases:
-  if (thisSize == 0) {
-    // this is empty
-    *this = t;
-  } else if (tSize == 0) {
-    // t is empty, we'll just return *this below.
-  } else if (!m_rep->baseString && m_rep->rc == 1) {
-    // this is direct and has refcount of 1 (so we can just alter it directly)
-    expandCapacity(thisOffset + length);
-    UChar *d = const_cast<UChar *>(data());
-    for (int i = 0; i < tSize; ++i)
-      d[thisSize+i] = t[i];
-    m_rep->len = length;
-    m_rep->_hash = 0;
-  } else if (thisOffset + thisSize == usedCapacity()) {
-    // this string reaches the end of the buffer - extend it
-    expandCapacity(thisOffset + length);
-    UChar *d = const_cast<UChar *>(data());
-    for (int i = 0; i < tSize; ++i)
-      d[thisSize+i] = t[i];
-    m_rep = Rep::create(m_rep, 0, length);
-  } else {
-    // this is shared with someone using more capacity, gotta make a whole new string
-    int newCapacity = expandedSize(length, 0);
-    UChar *d = static_cast<UChar *>(fastMalloc(sizeof(UChar) * newCapacity));
-    memcpy(d, data(), thisSize * sizeof(UChar));
-    for (int i = 0; i < tSize; ++i)
-      d[thisSize+i] = t[i];
-    m_rep = Rep::create(d, length);
-    m_rep->capacity = newCapacity;
-  }
-
-  return *this;
-}
-
-UString &UString::append(unsigned short c)
-{
-  int thisOffset = m_rep->offset;
-  int length = size();
-
-  // possible cases:
-  if (length == 0) {
-    // this is empty - must make a new m_rep because we don't want to pollute the shared empty one 
-    int newCapacity = expandedSize(1, 0);
-    UChar *d = static_cast<UChar *>(fastMalloc(sizeof(UChar) * newCapacity));
-    d[0] = c;
-    m_rep = Rep::create(d, 1);
-    m_rep->capacity = newCapacity;
-  } else if (!m_rep->baseString && m_rep->rc == 1) {
-    // this is direct and has refcount of 1 (so we can just alter it directly)
-    expandCapacity(thisOffset + length + 1);
-    UChar *d = const_cast<UChar *>(data());
-    d[length] = c;
-    m_rep->len = length + 1;
-    m_rep->_hash = 0;
-  } else if (thisOffset + length == usedCapacity()) {
-    // this reaches the end of the string - extend it and share
-    expandCapacity(thisOffset + length + 1);
-    UChar *d = const_cast<UChar *>(data());
-    d[length] = c;
-    m_rep = Rep::create(m_rep, 0, length + 1);
-  } else {
-    // this is shared with someone using more capacity, gotta make a whole new string
-    int newCapacity = expandedSize((length + 1), 0);
-    UChar *d = static_cast<UChar *>(fastMalloc(sizeof(UChar) * newCapacity));
-    memcpy(d, data(), length * sizeof(UChar));
-    d[length] = c;
-    m_rep = Rep::create(d, length + 1);
-    m_rep->capacity = newCapacity;
-  }
+  
+  int newCapacity = (newLen * 3 + 1) / 2;
+  UChar *n = new UChar[newCapacity];
+  memcpy(n, data(), l * sizeof(UChar));
+  memcpy(n+l, t.data(), tLen * sizeof(UChar));
+  release();
+  rep = Rep::create(n, newLen);
+  rep->capacity = newCapacity;
 
   return *this;
 }
@@ -816,15 +516,25 @@ UString &UString::operator=(const char *c)
 {
   int l = c ? strlen(c) : 0;
   UChar *d;
-  if (m_rep->rc == 1 && l <= m_rep->capacity && !m_rep->baseString && m_rep->offset == 0 && m_rep->preCapacity == 0) {
-    d = m_rep->buf;
-    m_rep->_hash = 0;
+  if (rep->rc == 1 && l <= rep->capacity) {
+    d = rep->dat;
+    rep->_hash = 0;
   } else {
-    d = static_cast<UChar *>(fastMalloc(sizeof(UChar) * l));
-    m_rep = Rep::create(d, l);
+    release();
+    d = new UChar[l];
+    rep = Rep::create(d, l);
   }
   for (int i = 0; i < l; i++)
     d[i].uc = c[i];
+
+  return *this;
+}
+
+UString &UString::operator=(const UString &str)
+{
+  str.rep->ref();
+  release();
+  rep = str.rep;
 
   return *this;
 }
@@ -855,12 +565,10 @@ UCharReference UString::operator[](int pos)
   return UCharReference(this, pos);
 }
 
-double UString::toDouble(bool tolerateTrailingJunk, bool tolerateEmptyString) const
+double UString::toDouble( bool tolerant ) const
 {
   double d;
 
-  // FIXME: If tolerateTrailingJunk is true, then we want to tolerate non-8-bit junk
-  // after the number, so is8Bit is too strict a check.
   if (!is8Bit())
     return NaN;
 
@@ -872,7 +580,7 @@ double UString::toDouble(bool tolerateTrailingJunk, bool tolerateEmptyString) co
 
   // empty string ?
   if (*c == '\0')
-    return tolerateEmptyString ? 0.0 : NaN;
+    return tolerant ? NaN : 0.0;
 
   // hex number ?
   if (*c == '0' && (*(c+1) == 'x' || *(c+1) == 'X')) {
@@ -912,20 +620,26 @@ double UString::toDouble(bool tolerateTrailingJunk, bool tolerateEmptyString) co
   while (isspace(*c))
     c++;
   // don't allow anything after - unless tolerant=true
-  if (!tolerateTrailingJunk && *c != '\0')
+  if ( !tolerant && *c != '\0')
     d = NaN;
 
   return d;
 }
 
-double UString::toDouble(bool tolerateTrailingJunk) const
+unsigned long UString::toULong(bool *ok) const
 {
-  return toDouble(tolerateTrailingJunk, true);
-}
+  double d = toDouble();
+  bool b = true;
 
-double UString::toDouble() const
-{
-  return toDouble(false, true);
+  if (isNaN(d) || d != static_cast<unsigned long>(d)) {
+    b = false;
+    d = 0;
+  }
+
+  if (ok)
+    *ok = b;
+
+  return static_cast<unsigned long>(d);
 }
 
 uint32_t UString::toUInt32(bool *ok) const
@@ -933,7 +647,7 @@ uint32_t UString::toUInt32(bool *ok) const
   double d = toDouble();
   bool b = true;
 
-  if (d != static_cast<uint32_t>(d)) {
+  if (isNaN(d) || d != static_cast<uint32_t>(d)) {
     b = false;
     d = 0;
   }
@@ -942,72 +656,6 @@ uint32_t UString::toUInt32(bool *ok) const
     *ok = b;
 
   return static_cast<uint32_t>(d);
-}
-
-uint32_t UString::toUInt32(bool *ok, bool tolerateEmptyString) const
-{
-  double d = toDouble(false, tolerateEmptyString);
-  bool b = true;
-
-  if (d != static_cast<uint32_t>(d)) {
-    b = false;
-    d = 0;
-  }
-
-  if (ok)
-    *ok = b;
-
-  return static_cast<uint32_t>(d);
-}
-
-uint32_t UString::toStrictUInt32(bool *ok) const
-{
-  if (ok)
-    *ok = false;
-
-  // Empty string is not OK.
-  int len = m_rep->len;
-  if (len == 0)
-    return 0;
-  const UChar *p = m_rep->data();
-  unsigned short c = p->unicode();
-
-  // If the first digit is 0, only 0 itself is OK.
-  if (c == '0') {
-    if (len == 1 && ok)
-      *ok = true;
-    return 0;
-  }
-  
-  // Convert to UInt32, checking for overflow.
-  uint32_t i = 0;
-  while (1) {
-    // Process character, turning it into a digit.
-    if (c < '0' || c > '9')
-      return 0;
-    const unsigned d = c - '0';
-    
-    // Multiply by 10, checking for overflow out of 32 bits.
-    if (i > 0xFFFFFFFFU / 10)
-      return 0;
-    i *= 10;
-    
-    // Add in the digit, checking for overflow out of 32 bits.
-    const unsigned max = 0xFFFFFFFFU - d;
-    if (i > max)
-        return 0;
-    i += d;
-    
-    // Handle end of string.
-    if (--len == 0) {
-      if (ok)
-        *ok = true;
-      return i;
-    }
-    
-    // Get next character.
-    c = (++p)->unicode();
-  }
 }
 
 int UString::find(const UString &f, int pos) const
@@ -1021,12 +669,10 @@ int UString::find(const UString &f, int pos) const
   if (fsz == 0)
     return pos;
   const UChar *end = data() + sz - fsz;
-  int fsizeminusone = (fsz - 1) * sizeof(UChar);
+  long fsizeminusone = (fsz - 1) * sizeof(UChar);
   const UChar *fdata = f.data();
-  unsigned short fchar = fdata->uc;
-  ++fdata;
   for (const UChar *c = data() + pos; c <= end; c++)
-    if (c->uc == fchar && !memcmp(c + 1, fdata, fsizeminusone))
+    if (*c == *fdata && !memcmp(c + 1, fdata + 1, fsizeminusone))
       return (c-data());
 
   return -1;
@@ -1056,7 +702,7 @@ int UString::rfind(const UString &f, int pos) const
     pos = sz - fsz;
   if (fsz == 0)
     return pos;
-  int fsizeminusone = (fsz - 1) * sizeof(UChar);
+  long fsizeminusone = (fsz - 1) * sizeof(UChar);
   const UChar *fdata = f.data();
   for (const UChar *c = data() + pos; c >= data(); c--) {
     if (*c == *fdata && !memcmp(c + 1, fdata + 1, fsizeminusone))
@@ -1082,43 +728,55 @@ int UString::rfind(UChar ch, int pos) const
 
 UString UString::substr(int pos, int len) const
 {
-  int s = size();
-
   if (pos < 0)
     pos = 0;
-  else if (pos >= s)
-    pos = s;
+  else if (pos >= (int) size())
+    pos = size();
   if (len < 0)
-    len = s;
-  if (pos + len >= s)
-    len = s - pos;
+    len = size();
+  if (pos + len >= (int) size())
+    len = size() - pos;
 
-  if (pos == 0 && len == s)
-    return *this;
+  UChar *tmp = new UChar[len];
+  memcpy(tmp, data()+pos, len * sizeof(UChar));
+  UString result(tmp, len);
+  delete [] tmp;
 
-  return UString(Rep::create(m_rep, pos, len));
+  return result;
 }
 
-void UString::copyForWriting()
+void UString::attach(Rep *r)
 {
-  if (m_rep->rc > 1 || m_rep->baseString) {
+  rep = r;
+  rep->ref();
+}
+
+void UString::detach()
+{
+  if (rep->rc > 1) {
     int l = size();
-    UChar *n = static_cast<UChar *>(fastMalloc(sizeof(UChar) * l));
+    UChar *n = new UChar[l];
     memcpy(n, data(), l * sizeof(UChar));
-    m_rep = Rep::create(n, l);
+    release();
+    rep = Rep::create(n, l);
   }
 }
 
-bool operator==(const UString& s1, const UString& s2)
+void UString::release()
 {
-  if (s1.m_rep->len != s2.m_rep->len)
-    return false;
-
-  return (memcmp(s1.m_rep->data(), s2.m_rep->data(),
-		 s1.m_rep->len * sizeof(UChar)) == 0);
+  rep->deref();
 }
 
-bool operator==(const UString& s1, const char *s2)
+bool KJS::operator==(const UString& s1, const UString& s2)
+{
+  if (s1.rep->len != s2.rep->len)
+    return false;
+
+  return (memcmp(s1.rep->dat, s2.rep->dat,
+		 s1.rep->len * sizeof(UChar)) == 0);
+}
+
+bool KJS::operator==(const UString& s1, const char *s2)
 {
   if (s2 == 0) {
     return s1.isEmpty();
@@ -1136,7 +794,7 @@ bool operator==(const UString& s1, const char *s2)
   return u == uend && *s2 == 0;
 }
 
-bool operator<(const UString& s1, const UString& s2)
+bool KJS::operator<(const UString& s1, const UString& s2)
 {
   const int l1 = s1.size();
   const int l2 = s2.size();
@@ -1155,7 +813,7 @@ bool operator<(const UString& s1, const UString& s2)
   return (l1 < l2);
 }
 
-int compare(const UString& s1, const UString& s2)
+int KJS::compare(const UString& s1, const UString& s2)
 {
   const int l1 = s1.size();
   const int l2 = s2.size();
@@ -1168,148 +826,11 @@ int compare(const UString& s1, const UString& s2)
     c2++;
     l++;
   }
-
   if (l < lmin)
     return (c1->uc > c2->uc) ? 1 : -1;
 
-  if (l1 == l2)
+  if (l1 == l2) {
     return 0;
-
-  return (l1 > l2) ? 1 : -1;
-}
-
-inline int inlineUTF8SequenceLengthNonASCII(char b0)
-{
-  if ((b0 & 0xC0) != 0xC0)
-    return 0;
-  if ((b0 & 0xE0) == 0xC0)
-    return 2;
-  if ((b0 & 0xF0) == 0xE0)
-    return 3;
-  if ((b0 & 0xF8) == 0xF0)
-    return 4;
-  return 0;
-}
-
-int UTF8SequenceLengthNonASCII(char b0)
-{
-  return inlineUTF8SequenceLengthNonASCII(b0);
-}
-
-inline int inlineUTF8SequenceLength(char b0)
-{
-  return (b0 & 0x80) == 0 ? 1 : UTF8SequenceLengthNonASCII(b0);
-}
-
-// Given a first byte, gives the length of the UTF-8 sequence it begins.
-// Returns 0 for bytes that are not legal starts of UTF-8 sequences.
-// Only allows sequences of up to 4 bytes, since that works for all Unicode characters (U-00000000 to U-0010FFFF).
-int UTF8SequenceLength(char b0)
-{
-  return (b0 & 0x80) == 0 ? 1 : inlineUTF8SequenceLengthNonASCII(b0);
-}
-
-// Takes a null-terminated C-style string with a UTF-8 sequence in it and converts it to a character.
-// Only allows Unicode characters (U-00000000 to U-0010FFFF).
-// Returns -1 if the sequence is not valid (including presence of extra bytes).
-int decodeUTF8Sequence(const char *sequence)
-{
-  // Handle 0-byte sequences (never valid).
-  const unsigned char b0 = sequence[0];
-  const int length = inlineUTF8SequenceLength(b0);
-  if (length == 0)
-    return -1;
-
-  // Handle 1-byte sequences (plain ASCII).
-  const unsigned char b1 = sequence[1];
-  if (length == 1) {
-    if (b1)
-      return -1;
-    return b0;
   }
-
-  // Handle 2-byte sequences.
-  if ((b1 & 0xC0) != 0x80)
-    return -1;
-  const unsigned char b2 = sequence[2];
-  if (length == 2) {
-    if (b2)
-      return -1;
-    const int c = ((b0 & 0x1F) << 6) | (b1 & 0x3F);
-    if (c < 0x80)
-      return -1;
-    return c;
-  }
-
-  // Handle 3-byte sequences.
-  if ((b2 & 0xC0) != 0x80)
-    return -1;
-  const unsigned char b3 = sequence[3];
-  if (length == 3) {
-    if (b3)
-      return -1;
-    const int c = ((b0 & 0xF) << 12) | ((b1 & 0x3F) << 6) | (b2 & 0x3F);
-    if (c < 0x800)
-      return -1;
-    // UTF-16 surrogates should never appear in UTF-8 data.
-    if (c >= 0xD800 && c <= 0xDFFF)
-      return -1;
-    // Backwards BOM and U+FFFF should never appear in UTF-8 data.
-    if (c == 0xFFFE || c == 0xFFFF)
-      return -1;
-    return c;
-  }
-
-  // Handle 4-byte sequences.
-  if ((b3 & 0xC0) != 0x80)
-    return -1;
-  const unsigned char b4 = sequence[4];
-  if (length == 4) {
-    if (b4)
-      return -1;
-    const int c = ((b0 & 0x7) << 18) | ((b1 & 0x3F) << 12) | ((b2 & 0x3F) << 6) | (b3 & 0x3F);
-    if (c < 0x10000 || c > 0x10FFFF)
-      return -1;
-    return c;
-  }
-
-  return -1;
+  return (l1 < l2) ? 1 : -1;
 }
-
-CString UString::UTF8String() const
-{
-  // Allocate a buffer big enough to hold all the characters.
-  const int length = size();
-  Vector<char, 1024> buffer(length * 3);
-
-  // Convert to runs of 8-bit characters.
-  char *p = buffer.begin();
-  const UChar *d = data();
-  for (int i = 0; i != length; ++i) {
-    unsigned short c = d[i].unicode();
-    if (c < 0x80) {
-      *p++ = (char)c;
-    } else if (c < 0x800) {
-      *p++ = (char)((c >> 6) | 0xC0); // C0 is the 2-byte flag for UTF-8
-      *p++ = (char)((c | 0x80) & 0xBF); // next 6 bits, with high bit set
-    } else if (c >= 0xD800 && c <= 0xDBFF && i < length && d[i+1].uc >= 0xDC00 && d[i+1].uc <= 0xDFFF) {
-      unsigned sc = 0x10000 + (((c & 0x3FF) << 10) | (d[i+1].uc & 0x3FF));
-      *p++ = (char)((sc >> 18) | 0xF0); // F0 is the 4-byte flag for UTF-8
-      *p++ = (char)(((sc >> 12) | 0x80) & 0xBF); // next 6 bits, with high bit set
-      *p++ = (char)(((sc >> 6) | 0x80) & 0xBF); // next 6 bits, with high bit set
-      *p++ = (char)((sc | 0x80) & 0xBF); // next 6 bits, with high bit set
-      ++i;
-    } else {
-      *p++ = (char)((c >> 12) | 0xE0); // E0 is the 3-byte flag for UTF-8
-      *p++ = (char)(((c >> 6) | 0x80) & 0xBF); // next 6 bits, with high bit set
-      *p++ = (char)((c | 0x80) & 0xBF); // next 6 bits, with high bit set
-    }
-  }
-
-  // Return the result as a C string.
-  CString result(buffer, p - buffer);
-
-  return result;
-}
-
-} // namespace KJS

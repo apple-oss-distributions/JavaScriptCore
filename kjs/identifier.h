@@ -14,8 +14,8 @@
  *
  *  You should have received a copy of the GNU Library General Public License
  *  along with this library; see the file COPYING.LIB.  If not, write to
- *  the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- *  Boston, MA 02110-1301, USA.
+ *  the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ *  Boston, MA 02111-1307, USA.
  *
  */
 
@@ -34,11 +34,10 @@ namespace KJS {
         Identifier() { }
         Identifier(const char *s) : _ustring(add(s)) { }
         Identifier(const UChar *s, int length) : _ustring(add(s, length)) { }
-        explicit Identifier(UString::Rep *rep) : _ustring(add(rep)) { } 
-        explicit Identifier(const UString &s) : _ustring(add(s.rep())) { }
+        explicit Identifier(const UString &s) : _ustring(add(s.rep)) { }
         
         const UString &ustring() const { return _ustring; }
-        DOM::DOMString domString() const;
+        DOM::DOMString string() const;
         QString qstring() const;
         
         const UChar *data() const { return _ustring.data(); }
@@ -51,9 +50,8 @@ namespace KJS {
         bool isNull() const { return _ustring.isNull(); }
         bool isEmpty() const { return _ustring.isEmpty(); }
         
+        unsigned long toULong(bool *ok) const { return _ustring.toULong(ok); }
         uint32_t toUInt32(bool *ok) const { return _ustring.toUInt32(ok); }
-        uint32_t toStrictUInt32(bool *ok) const { return _ustring.toStrictUInt32(ok); }
-        unsigned toArrayIndex(bool *ok) const { return _ustring.toArrayIndex(ok); }
         double toDouble() const { return _ustring.toDouble(); }
         
         static const Identifier &null();
@@ -65,30 +63,34 @@ namespace KJS {
     
         static void remove(UString::Rep *);
 
-        static bool equal(const UString::Rep *, const char *);
-        static bool equal(const UString::Rep *, const UChar *, int length);
-        static bool equal(const UString::Rep *, const UString::Rep *);
-
     private:
         UString _ustring;
         
+        static bool equal(UString::Rep *, const char *);
+        static bool equal(UString::Rep *, const UChar *, int length);
+        static bool equal(UString::Rep *, UString::Rep *);
+
         static bool equal(const Identifier &a, const Identifier &b)
-            { return a._ustring.rep() == b._ustring.rep(); }
+            { return a._ustring.rep == b._ustring.rep; }
         static bool equal(const Identifier &a, const char *b)
-            { return equal(a._ustring.rep(), b); }
+            { return equal(a._ustring.rep, b); }
         
-        static PassRefPtr<UString::Rep> add(const char *);
-        static PassRefPtr<UString::Rep> add(const UChar *, int length);
-        static PassRefPtr<UString::Rep> add(UString::Rep *);
+        static UString::Rep *add(const char *);
+        static UString::Rep *add(const UChar *, int length);
+        static UString::Rep *add(UString::Rep *);
+        
+        static void insert(UString::Rep *);
+        
+        static void rehash(int newTableSize);
+        static void expand();
+        static void shrink();
+
+        static UString::Rep **_table;
+        static int _tableSize;
+        static int _tableSizeMask;
+        static int _keyCount;
     };
     
-#if !KJS_IDENTIFIER_HIDE_GLOBALS
-    extern const Identifier nullIdentifier;
-
-    inline const Identifier &Identifier::null()
-        { return nullIdentifier; }
-#endif
-
     inline bool operator==(const Identifier &a, const Identifier &b)
         { return Identifier::equal(a, b); }
 
@@ -100,29 +102,24 @@ namespace KJS {
 
     // List of property names, passed to a macro so we can do set them up various
     // ways without repeating the list.
-    #define KJS_IDENTIFIER_EACH_PROPERTY_NAME_GLOBAL(macro) \
+    #define KJS_IDENTIFIER_EACH_GLOBAL(macro) \
         macro(arguments) \
         macro(callee) \
         macro(constructor) \
-        macro(fromCharCode) \
         macro(length) \
         macro(message) \
         macro(name) \
         macro(prototype) \
         macro(toLocaleString) \
         macro(toString) \
-        macro(toFixed) \
-        macro(toExponential) \
-        macro(toPrecision) \
         macro(valueOf)
 
     // Define external global variables for all property names above (and one more).
 #if !KJS_IDENTIFIER_HIDE_GLOBALS
-    extern const Identifier specialPrototypePropertyName;
-
-    #define KJS_IDENTIFIER_DECLARE_PROPERTY_NAME_GLOBAL(name) extern const Identifier name ## PropertyName;
-    KJS_IDENTIFIER_EACH_PROPERTY_NAME_GLOBAL(KJS_IDENTIFIER_DECLARE_PROPERTY_NAME_GLOBAL)
-    #undef KJS_IDENTIFIER_DECLARE_PROPERTY_NAME_GLOBAL
+    #define KJS_IDENTIFIER_DECLARE_GLOBAL(name) extern const Identifier name ## PropertyName;
+    KJS_IDENTIFIER_EACH_GLOBAL(KJS_IDENTIFIER_DECLARE_GLOBAL)
+    KJS_IDENTIFIER_DECLARE_GLOBAL(specialPrototype)
+    #undef KJS_IDENTIFIER_DECLARE_GLOBAL
 #endif
 
 }

@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2003, 2006 Apple Computer, Inc.
+ *  Copyright (C) 2003 Apple Computer, Inc.
  *
  *  This library is free software; you can redistribute it and/or
  *  modify it under the terms of the GNU Lesser General Public
@@ -13,14 +13,11 @@
  *
  *  You should have received a copy of the GNU Lesser General Public
  *  License along with this library; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301,
- *  USA.
+ *  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  */
 
-#include "config.h"
-
-namespace KJS {
+#include <config.h>
 
 // This file exists because JavaScriptCore needs to define the NaN and Inf globals in a way
 // that does not use a static initializer so we don't have a framework initialization routine.
@@ -31,35 +28,14 @@ namespace KJS {
 // characters don't necessarily need the same alignment doubles do, but for now it seems to work.
 // It would be good to figure out a 100% clean way that still avoids code that runs at init time.
 
-#if PLATFORM(DARWIN)
+namespace KJS {
 
-#if PLATFORM(BIG_ENDIAN)
-    extern const unsigned char NaN[sizeof(double)] = { 0x7f, 0xf8, 0, 0, 0, 0, 0, 0 };
-    extern const unsigned char Inf[sizeof(double)] = { 0x7f, 0xf0, 0, 0, 0, 0, 0, 0 };
-#elif PLATFORM(MIDDLE_ENDIAN)
-    extern const unsigned char NaN[] = { 0, 0, 0xf8, 0x7f, 0, 0, 0, 0 };
-    extern const unsigned char Inf[] = { 0, 0, 0xf0, 0x7f, 0, 0, 0, 0 };
+#ifdef WORDS_BIGENDIAN
+  extern const unsigned char NaN[sizeof(double)] = { 0x7f, 0xf8, 0, 0, 0, 0, 0, 0 };
+  extern const unsigned char Inf[sizeof(double)] = { 0x7f, 0xf0, 0, 0, 0, 0, 0, 0 };
 #else
-    extern const unsigned char NaN[sizeof(double)] = { 0, 0, 0, 0, 0, 0, 0xf8, 0x7f };
-    extern const unsigned char Inf[sizeof(double)] = { 0, 0, 0, 0, 0, 0, 0xf0, 0x7f };
-#endif // PLATFORM(MIDDLE_ENDIAN)
-
-#else // !PLATFORM(DARWIN)
-
-#if PLATFORM(BIG_ENDIAN)
-    const unsigned char NaN_Bytes[] = { 0x7f, 0xf8, 0, 0, 0, 0, 0, 0 };
-    const unsigned char Inf_Bytes[] = { 0x7f, 0xf0, 0, 0, 0, 0, 0, 0 };
-#elif PLATFORM(MIDDLE_ENDIAN)
-    const unsigned char NaN_Bytes[] = { 0, 0, 0xf8, 0x7f, 0, 0, 0, 0 };
-    const unsigned char Inf_Bytes[] = { 0, 0, 0xf0, 0x7f, 0, 0, 0, 0 };
-#else
-    const unsigned char NaN_Bytes[] = { 0, 0, 0, 0, 0, 0, 0xf8, 0x7f };
-    const unsigned char Inf_Bytes[] = { 0, 0, 0, 0, 0, 0, 0xf0, 0x7f };
+  extern const unsigned char NaN[sizeof(double)] = { 0, 0, 0, 0, 0, 0, 0xf8, 0x7f };
+  extern const unsigned char Inf[sizeof(double)] = { 0, 0, 0, 0, 0, 0, 0xf0, 0x7f };
 #endif
-    extern const double NaN = *(const double*) NaN_Bytes;
-    extern const double Inf = *(const double*) Inf_Bytes;
- 
-#endif // !PLATFORM(DARWIN)
 
-
-} // namespace KJS
+};

@@ -169,15 +169,17 @@
  *	the result overflows to +-Infinity or underflows to 0.
  */
 
-#include "config.h"
-#include "dtoa.h"
-
-#if PLATFORM(BIG_ENDIAN)
+#include <config.h>
+#ifdef WORDS_BIGENDIAN
 #define IEEE_MC68k
 #else
 #define IEEE_8087
 #endif
 #define INFNAN_CHECK
+#include "dtoa.h"
+#define strtod kjs_strtod
+#define dtoa kjs_dtoa
+#define freedtoa kjs_freedtoa
 
 
 
@@ -189,15 +191,15 @@ typedef unsigned Long ULong;
 #endif
 
 #ifdef DEBUG
-#include <stdio.h>
+#include "stdio.h"
 #define Bug(x) {fprintf(stderr, "%s\n", x); exit(1);}
 #endif
 
-#include <stdlib.h>
-#include <string.h>
+#include "stdlib.h"
+#include "string.h"
 
 #ifdef USE_LOCALE
-#include <locale.h>
+#include "locale.h"
 #endif
 
 #ifdef MALLOC
@@ -227,7 +229,7 @@ static double private_mem[PRIVATE_mem], *pmem_next = private_mem;
 #define IEEE_Arith
 #endif
 
-#include <errno.h>
+#include "errno.h"
 
 #ifdef Bad_float_h
 
@@ -259,16 +261,12 @@ static double private_mem[PRIVATE_mem], *pmem_next = private_mem;
 #endif
 
 #else /* ifndef Bad_float_h */
-#include <float.h>
+#include "float.h"
 #endif /* Bad_float_h */
 
 #ifndef __MATH_H__
-#include <math.h>
+#include "math.h"
 #endif
-
-#define strtod kjs_strtod
-#define dtoa kjs_dtoa
-#define freedtoa kjs_freedtoa
 
 #ifdef __cplusplus
 extern "C" {
@@ -527,7 +525,7 @@ Balloc
 #else
 		len = (sizeof(Bigint) + (x-1)*sizeof(ULong) + sizeof(double) - 1)
 			/sizeof(double);
-		if (pmem_next - private_mem + len <= (unsigned)PRIVATE_mem) {
+		if (pmem_next - private_mem + len <= PRIVATE_mem) {
 			rv = (Bigint*)pmem_next;
 			pmem_next += len;
 			}

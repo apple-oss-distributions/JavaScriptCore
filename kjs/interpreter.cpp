@@ -17,618 +17,286 @@
  *
  *  You should have received a copy of the GNU Library General Public License
  *  along with this library; see the file COPYING.LIB.  If not, write to
- *  the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- *  Boston, MA 02110-1301, USA.
+ *  the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ *  Boston, MA 02111-1307, USA.
  *
  */
 
-#include "config.h"
-#include "interpreter.h"
-
-#include "SavedBuiltins.h"
-#include "array_object.h"
-#include "bool_object.h"
-#include "collector.h"
-#include "context.h"
-#include "date_object.h"
-#include "debugger.h"
-#include "error_object.h"
-#include "function_object.h"
-#include "internal.h"
-#include "math_object.h"
-#include "nodes.h"
-#include "number_object.h"
-#include "object.h"
-#include "object_object.h"
-#include "operations.h"
-#include "regexp_object.h"
-#include "string_object.h"
-#include "types.h"
 #include "value.h"
-
-#if PLATFORM(MAC)
-#include "runtime.h"
-#endif
-
-#if HAVE(SYS_TIME_H)
-#include <sys/time.h>
-#endif
+#include "object.h"
+#include "types.h"
+#include "interpreter.h"
 
 #include <assert.h>
 #include <math.h>
-#include <signal.h>
 #include <stdio.h>
 
-namespace KJS {
+#include "internal.h"
+#include "collector.h"
+#include "operations.h"
+#include "error_object.h"
+#include "nodes.h"
+#include "context.h"
 
-    
-typedef enum {
-    NotTimedOut,
-    TimedOut,
-    NotChecked
-} TimeoutState;
-    
-class TimeoutChecker {
-public:
-    void startTimeoutCheck(Interpreter*);
-    void stopTimeoutCheck(Interpreter*);
-    void pauseTimeoutCheck(Interpreter*);
-    void resumeTimeoutCheck(Interpreter*);
-    TimeoutState timedOut(Interpreter* interpreter);
-private:
-    timeval m_startTime;
-    timeval m_pauseTime;
-};
+using namespace KJS;
 
+// ------------------------------ Context --------------------------------------
 
-void TimeoutChecker::startTimeoutCheck(Interpreter *interpreter)
-{    
-    if (!interpreter->m_timeoutTime)
-        return;
-    
-    interpreter->m_startTimeoutCheckCount++;
-    if (interpreter->m_startTimeoutCheckCount == 1)
-        gettimeofday(&m_startTime, 0);
+const ScopeChain &Context::scopeChain() const
+{
+  return rep->scopeChain();
 }
 
-void TimeoutChecker::stopTimeoutCheck(Interpreter* interpreter)
+Object Context::variableObject() const
 {
-    if (!interpreter->m_timeoutTime)
-        return;
-    
-    ASSERT(interpreter->m_startTimeoutCheckCount > 0);
-    interpreter->m_startTimeoutCheckCount--;        
+  return rep->variableObject();
 }
 
-void TimeoutChecker::pauseTimeoutCheck(Interpreter* interpreter)
+Object Context::thisValue() const
 {
-    if (interpreter->m_startTimeoutCheckCount == 0)
-        return;
-            
-    interpreter->m_pauseTimeoutCheckCount++;
-    if (interpreter->m_pauseTimeoutCheckCount == 1)
-        gettimeofday(&m_pauseTime, 0);
+  return rep->thisValue();
 }
 
-void TimeoutChecker::resumeTimeoutCheck(Interpreter* interpreter)
+const Context Context::callingContext() const
 {
-    if (interpreter->m_startTimeoutCheckCount == 0)
-        return;
-    
-    ASSERT(interpreter->m_pauseTimeoutCheckCount > 0);
-    interpreter->m_pauseTimeoutCheckCount--;
-    
-    if (interpreter->m_pauseTimeoutCheckCount == 0) {
-        timeval resumeTime;
-        gettimeofday(&resumeTime, 0);
-        timeval diffTime;
-        diffTime.tv_sec = resumeTime.tv_sec - m_pauseTime.tv_sec;
-        diffTime.tv_usec = resumeTime.tv_usec - m_pauseTime.tv_usec;
-        m_startTime.tv_sec += diffTime.tv_sec;
-        m_startTime.tv_usec += diffTime.tv_usec;
-        if (m_startTime.tv_usec > 1000000) {
-            m_startTime.tv_sec++;
-            m_startTime.tv_usec -= 1000000;
-        } else if (m_startTime.tv_usec < 0) {
-            m_startTime.tv_sec--;
-            m_startTime.tv_usec += 1000000;
-        }
-    }
+  return rep->callingContext();
 }
 
-#define TimeCheckCount  1000
+// ------------------------------ Interpreter ----------------------------------
 
-TimeoutState TimeoutChecker::timedOut(Interpreter* interpreter)
+Interpreter::Interpreter(const Object &global) : rep(0)
 {
-    interpreter->m_timeoutCheckCount++;
-    if (interpreter->m_timeoutCheckCount == TimeCheckCount) {
-        interpreter->m_timeoutCheckCount = 0;
-        timeval currentTime;
-        gettimeofday(&currentTime, 0);
-        long millisecondsEllapsed = ((currentTime.tv_sec - m_startTime.tv_sec) * 1000) + ((currentTime.tv_usec - m_startTime.tv_usec) / 1000);
-        if (millisecondsEllapsed > interpreter->m_timeoutTime) {
-            m_startTime.tv_sec = currentTime.tv_sec;
-            m_startTime.tv_usec = currentTime.tv_usec;
-            return TimedOut;
-        } else {
-            return NotTimedOut;
-        }
-    }    
-    return NotChecked;    
-}
-
-bool Interpreter::checkTimeout()
-{
-    if (m_timeoutChecker) {
-        // If the timeout was checked and there was no timeout, allow subclasses to cancel execution at this point.
-        TimeoutState timeoutState = m_timeoutChecker->timedOut(this);
-        if (timeoutState == TimedOut || (timeoutState == NotTimedOut && shouldStopExecution()))
-            return handleTimeout();
-    }
-    return false;
-}
-
-
-Interpreter* Interpreter::s_hook = 0;
-    
-typedef HashMap<JSObject*, Interpreter*> InterpreterMap;
-static inline InterpreterMap &interpreterMap()
-{
-    static InterpreterMap* map = new InterpreterMap;
-    return* map;
-}
-    
-Interpreter::Interpreter(JSObject* globalObject)
-    : m_globalExec(this, 0)
-    , m_globalObject(globalObject)
-{
-    init();
+  rep = new InterpreterImp(this,global);
 }
 
 Interpreter::Interpreter()
-    : m_globalExec(this, 0)
-    , m_globalObject(new JSObject())
 {
-    init();
-}
-
-void Interpreter::init()
-{
-    JSLock lock;
-
-    m_refCount = 0;
-    m_timeoutTime = 0;
-    m_recursion = 0;
-    m_debugger= 0;
-    m_context = 0;
-    m_timedOut = false;
-    m_timeoutChecker = 0;
-    m_startTimeoutCheckCount = 0;
-    m_pauseTimeoutCheckCount = 0;
-    m_compatMode = NativeMode;
-    m_argumentsPropertyName = &argumentsPropertyName;
-    m_specialPrototypePropertyName = &specialPrototypePropertyName;
-
-    interpreterMap().set(m_globalObject, this);
-
-    if (s_hook) {
-        prev = s_hook;
-        next = s_hook->next;
-        s_hook->next->prev = this;
-        s_hook->next = this;
-    } else {
-        // This is the first interpreter
-        s_hook = next = prev = this;
-    }
-    
-    initGlobalObject();
+  Object global(new ObjectImp());
+  rep = new InterpreterImp(this,global);
 }
 
 Interpreter::~Interpreter()
 {
-    JSLock lock;
-    
-    ASSERT (m_startTimeoutCheckCount == 0);
-    ASSERT (m_pauseTimeoutCheckCount == 0);
-    
-    delete m_timeoutChecker;
-    
-    if (m_debugger)
-        m_debugger->detach(this);
-
-    next->prev = prev;
-    prev->next = next;
-    s_hook = next;
-    if (s_hook == this)
-    {
-        // This was the last interpreter
-        s_hook = 0;
-    }
-    
-    interpreterMap().remove(m_globalObject);
+  delete rep;
 }
 
-JSObject* Interpreter::globalObject() const
+Object &Interpreter::globalObject() const
 {
-  return m_globalObject;
+  return rep->globalObject();
 }
 
 void Interpreter::initGlobalObject()
 {
-    Identifier::init();
+  rep->initGlobalObject();
+}
 
-    FunctionPrototype *funcProto = new FunctionPrototype(&m_globalExec);
-    m_FunctionPrototype = funcProto;
-    ObjectPrototype *objProto = new ObjectPrototype(&m_globalExec, funcProto);
-    m_ObjectPrototype = objProto;
-    funcProto->setPrototype(m_ObjectPrototype);
-    
-    ArrayPrototype *arrayProto = new ArrayPrototype(&m_globalExec, objProto);
-    m_ArrayPrototype = arrayProto;
-    StringPrototype *stringProto = new StringPrototype(&m_globalExec, objProto);
-    m_StringPrototype = stringProto;
-    BooleanPrototype *booleanProto = new BooleanPrototype(&m_globalExec, objProto, funcProto);
-    m_BooleanPrototype = booleanProto;
-    NumberPrototype *numberProto = new NumberPrototype(&m_globalExec, objProto, funcProto);
-    m_NumberPrototype = numberProto;
-    DatePrototype *dateProto = new DatePrototype(&m_globalExec, objProto);
-    m_DatePrototype = dateProto;
-    RegExpPrototype *regexpProto = new RegExpPrototype(&m_globalExec, objProto, funcProto);
-    m_RegExpPrototype = regexpProto;
-    ErrorPrototype *errorProto = new ErrorPrototype(&m_globalExec, objProto, funcProto);
-    m_ErrorPrototype = errorProto;
-    
-    JSObject* o = m_globalObject;
-    while (o->prototype()->isObject())
-        o = static_cast<JSObject*>(o->prototype());
-    o->setPrototype(m_ObjectPrototype);
-    
-    // Constructors (Object, Array, etc.)
-    m_Object = new ObjectObjectImp(&m_globalExec, objProto, funcProto);
-    m_Function = new FunctionObjectImp(&m_globalExec, funcProto);
-    m_Array = new ArrayObjectImp(&m_globalExec, funcProto, arrayProto);
-    m_String = new StringObjectImp(&m_globalExec, funcProto, stringProto);
-    m_Boolean = new BooleanObjectImp(&m_globalExec, funcProto, booleanProto);
-    m_Number = new NumberObjectImp(&m_globalExec, funcProto, numberProto);
-    m_Date = new DateObjectImp(&m_globalExec, funcProto, dateProto);
-    m_RegExp = new RegExpObjectImp(&m_globalExec, funcProto, regexpProto);
-    m_Error = new ErrorObjectImp(&m_globalExec, funcProto, errorProto);
-    
-    // Error object prototypes
-    m_EvalErrorPrototype = new NativeErrorPrototype(&m_globalExec, errorProto, EvalError, "EvalError", "EvalError");
-    m_RangeErrorPrototype = new NativeErrorPrototype(&m_globalExec, errorProto, RangeError, "RangeError", "RangeError");
-    m_ReferenceErrorPrototype = new NativeErrorPrototype(&m_globalExec, errorProto, ReferenceError, "ReferenceError", "ReferenceError");
-    m_SyntaxErrorPrototype = new NativeErrorPrototype(&m_globalExec, errorProto, SyntaxError, "SyntaxError", "SyntaxError");
-    m_TypeErrorPrototype = new NativeErrorPrototype(&m_globalExec, errorProto, TypeError, "TypeError", "TypeError");
-    m_UriErrorPrototype = new NativeErrorPrototype(&m_globalExec, errorProto, URIError, "URIError", "URIError");
-    
-    // Error objects
-    m_EvalError = new NativeErrorImp(&m_globalExec, funcProto, m_EvalErrorPrototype);
-    m_RangeError = new NativeErrorImp(&m_globalExec, funcProto, m_RangeErrorPrototype);
-    m_ReferenceError = new NativeErrorImp(&m_globalExec, funcProto, m_ReferenceErrorPrototype);
-    m_SyntaxError = new NativeErrorImp(&m_globalExec, funcProto, m_SyntaxErrorPrototype);
-    m_TypeError = new NativeErrorImp(&m_globalExec, funcProto, m_TypeErrorPrototype);
-    m_UriError = new NativeErrorImp(&m_globalExec, funcProto, m_UriErrorPrototype);
-    
-    // ECMA 15.3.4.1
-    funcProto->put(&m_globalExec, constructorPropertyName, m_Function, DontEnum);
-    
-    m_globalObject->put(&m_globalExec, "Object", m_Object, DontEnum);
-    m_globalObject->put(&m_globalExec, "Function", m_Function, DontEnum);
-    m_globalObject->put(&m_globalExec, "Array", m_Array, DontEnum);
-    m_globalObject->put(&m_globalExec, "Boolean", m_Boolean, DontEnum);
-    m_globalObject->put(&m_globalExec, "String", m_String, DontEnum);
-    m_globalObject->put(&m_globalExec, "Number", m_Number, DontEnum);
-    m_globalObject->put(&m_globalExec, "Date", m_Date, DontEnum);
-    m_globalObject->put(&m_globalExec, "RegExp", m_RegExp, DontEnum);
-    m_globalObject->put(&m_globalExec, "Error", m_Error, DontEnum);
-    // Using Internal for those to have something != 0
-    // (see kjs_window). Maybe DontEnum would be ok too ?
-    m_globalObject->put(&m_globalExec, "EvalError",m_EvalError, Internal);
-    m_globalObject->put(&m_globalExec, "RangeError",m_RangeError, Internal);
-    m_globalObject->put(&m_globalExec, "ReferenceError",m_ReferenceError, Internal);
-    m_globalObject->put(&m_globalExec, "SyntaxError",m_SyntaxError, Internal);
-    m_globalObject->put(&m_globalExec, "TypeError",m_TypeError, Internal);
-    m_globalObject->put(&m_globalExec, "URIError",m_UriError, Internal);
-    
-    // Set the constructorPropertyName property of all builtin constructors
-    objProto->put(&m_globalExec, constructorPropertyName, m_Object, DontEnum | DontDelete | ReadOnly);
-    funcProto->put(&m_globalExec, constructorPropertyName, m_Function, DontEnum | DontDelete | ReadOnly);
-    arrayProto->put(&m_globalExec, constructorPropertyName, m_Array, DontEnum | DontDelete | ReadOnly);
-    booleanProto->put(&m_globalExec, constructorPropertyName, m_Boolean, DontEnum | DontDelete | ReadOnly);
-    stringProto->put(&m_globalExec, constructorPropertyName, m_String, DontEnum | DontDelete | ReadOnly);
-    numberProto->put(&m_globalExec, constructorPropertyName, m_Number, DontEnum | DontDelete | ReadOnly);
-    dateProto->put(&m_globalExec, constructorPropertyName, m_Date, DontEnum | DontDelete | ReadOnly);
-    regexpProto->put(&m_globalExec, constructorPropertyName, m_RegExp, DontEnum | DontDelete | ReadOnly);
-    errorProto->put(&m_globalExec, constructorPropertyName, m_Error, DontEnum | DontDelete | ReadOnly);
-    m_EvalErrorPrototype->put(&m_globalExec, constructorPropertyName, m_EvalError, DontEnum | DontDelete | ReadOnly);
-    m_RangeErrorPrototype->put(&m_globalExec, constructorPropertyName, m_RangeError, DontEnum | DontDelete | ReadOnly);
-    m_ReferenceErrorPrototype->put(&m_globalExec, constructorPropertyName, m_ReferenceError, DontEnum | DontDelete | ReadOnly);
-    m_SyntaxErrorPrototype->put(&m_globalExec, constructorPropertyName, m_SyntaxError, DontEnum | DontDelete | ReadOnly);
-    m_TypeErrorPrototype->put(&m_globalExec, constructorPropertyName, m_TypeError, DontEnum | DontDelete | ReadOnly);
-    m_UriErrorPrototype->put(&m_globalExec, constructorPropertyName, m_UriError, DontEnum | DontDelete | ReadOnly);
-    
-    // built-in values
-    m_globalObject->put(&m_globalExec, "NaN",        jsNaN(), DontEnum|DontDelete);
-    m_globalObject->put(&m_globalExec, "Infinity",   jsNumber(Inf), DontEnum|DontDelete);
-    m_globalObject->put(&m_globalExec, "undefined",  jsUndefined(), DontEnum|DontDelete);
-    
-    // built-in functions
-    m_globalObject->putDirectFunction(new GlobalFuncImp(&m_globalExec, funcProto, GlobalFuncImp::Eval, 1, "eval"), DontEnum);
-    m_globalObject->putDirectFunction(new GlobalFuncImp(&m_globalExec, funcProto, GlobalFuncImp::ParseInt, 2, "parseInt"), DontEnum);
-    m_globalObject->putDirectFunction(new GlobalFuncImp(&m_globalExec, funcProto, GlobalFuncImp::ParseFloat, 1, "parseFloat"), DontEnum);
-    m_globalObject->putDirectFunction(new GlobalFuncImp(&m_globalExec, funcProto, GlobalFuncImp::IsNaN, 1, "isNaN"), DontEnum);
-    m_globalObject->putDirectFunction(new GlobalFuncImp(&m_globalExec, funcProto, GlobalFuncImp::IsFinite, 1, "isFinite"), DontEnum);
-    m_globalObject->putDirectFunction(new GlobalFuncImp(&m_globalExec, funcProto, GlobalFuncImp::Escape, 1, "escape"), DontEnum);
-    m_globalObject->putDirectFunction(new GlobalFuncImp(&m_globalExec, funcProto, GlobalFuncImp::UnEscape, 1, "unescape"), DontEnum);
-    m_globalObject->putDirectFunction(new GlobalFuncImp(&m_globalExec, funcProto, GlobalFuncImp::DecodeURI, 1, "decodeURI"), DontEnum);
-    m_globalObject->putDirectFunction(new GlobalFuncImp(&m_globalExec, funcProto, GlobalFuncImp::DecodeURIComponent, 1, "decodeURIComponent"), DontEnum);
-    m_globalObject->putDirectFunction(new GlobalFuncImp(&m_globalExec, funcProto, GlobalFuncImp::EncodeURI, 1, "encodeURI"), DontEnum);
-    m_globalObject->putDirectFunction(new GlobalFuncImp(&m_globalExec, funcProto, GlobalFuncImp::EncodeURIComponent, 1, "encodeURIComponent"), DontEnum);
-#ifndef NDEBUG
-    m_globalObject->putDirectFunction(new GlobalFuncImp(&m_globalExec, funcProto, GlobalFuncImp::KJSPrint, 1, "kjsprint"), DontEnum);
+void Interpreter::lock()
+{
+  InterpreterImp::lock();
+}
+
+void Interpreter::unlock()
+{
+  InterpreterImp::unlock();
+}
+
+int Interpreter::lockCount()
+{
+  return InterpreterImp::lockCount();
+}
+
+ExecState *Interpreter::globalExec()
+{
+  return rep->globalExec();
+}
+
+bool Interpreter::checkSyntax(const UString &code)
+{
+  return rep->checkSyntax(code);
+}
+
+Completion Interpreter::evaluate(const UString &code, const Value &thisV, const UString &filename)
+{
+  Completion comp = rep->evaluate(code,thisV);
+
+#if APPLE_CHANGES
+  if (shouldPrintExceptions() && comp.complType() == Throw) {
+    lock();
+    ExecState *exec = rep->globalExec();
+    char *f = strdup(filename.ascii());
+    const char *message = comp.value().toObject(exec).toString(exec).ascii();
+    printf("%s:%s\n", f, message);
+    free(f);
+    unlock();
+  }
 #endif
-    
-    // built-in objects
-    m_globalObject->put(&m_globalExec, "Math", new MathObjectImp(&m_globalExec, objProto), DontEnum);
+
+  return comp;
 }
 
-ExecState* Interpreter::globalExec()
+InterpreterImp *Interpreter::imp()
 {
-  return &m_globalExec;
+  return rep;
 }
 
-Completion Interpreter::checkSyntax(const UString& sourceURL, int startingLineNumber, const UString& code)
+Object Interpreter::builtinObject() const
 {
-    return checkSyntax(sourceURL, startingLineNumber, code.data(), code.size());
+  return rep->builtinObject();
 }
 
-Completion Interpreter::checkSyntax(const UString& sourceURL, int startingLineNumber, const UChar* code, int codeLength)
+Object Interpreter::builtinFunction() const
 {
-    JSLock lock;
-
-    int errLine;
-    UString errMsg;
-    RefPtr<ProgramNode> progNode = Parser::parse(sourceURL, startingLineNumber, code, codeLength, 0, &errLine, &errMsg);
-    if (!progNode)
-        return Completion(Throw, Error::create(&m_globalExec, SyntaxError, errMsg, errLine, 0, sourceURL));
-    return Completion(Normal);
+  return rep->builtinFunction();
 }
 
-Completion Interpreter::evaluate(const UString& sourceURL, int startingLineNumber, const UString& code, JSValue* thisV)
+Object Interpreter::builtinArray() const
 {
-    return evaluate(sourceURL, startingLineNumber, code.data(), code.size(), thisV);
+  return rep->builtinArray();
 }
 
-Completion Interpreter::evaluate(const UString& sourceURL, int startingLineNumber, const UChar* code, int codeLength, JSValue* thisV)
+Object Interpreter::builtinBoolean() const
 {
-    JSLock lock;
-    
-    // prevent against infinite recursion
-    if (m_recursion >= 20)
-        return Completion(Throw, Error::create(&m_globalExec, GeneralError, "Recursion too deep"));
-    
-    // parse the source code
-    int sid;
-    int errLine;
-    UString errMsg;
-    RefPtr<ProgramNode> progNode = Parser::parse(sourceURL, startingLineNumber, code, codeLength, &sid, &errLine, &errMsg);
-    
-    // notify debugger that source has been parsed
-    if (m_debugger) {
-        bool cont = m_debugger->sourceParsed(&m_globalExec, sid, sourceURL, UString(code, codeLength), startingLineNumber, errLine, errMsg);
-        if (!cont)
-            return Completion(Break);
-    }
-    
-    // no program node means a syntax error occurred
-    if (!progNode)
-        return Completion(Throw, Error::create(&m_globalExec, SyntaxError, errMsg, errLine, sid, sourceURL));
-    
-    m_globalExec.clearException();
-    
-    m_recursion++;
-    
-    JSObject* globalObj = m_globalObject;
-    JSObject* thisObj = globalObj;
-    
-    // "this" must be an object... use same rules as Function.prototype.apply()
-    if (thisV && !thisV->isUndefinedOrNull())
-        thisObj = thisV->toObject(&m_globalExec);
-    
-    Completion res;
-    if (m_globalExec.hadException())
-        // the thisV->toObject() conversion above might have thrown an exception - if so, propagate it
-        res = Completion(Throw, m_globalExec.exception());
-    else {
-        // execute the code
-        Context ctx(globalObj, this, thisObj, progNode.get());
-        ExecState newExec(this, &ctx);
-        progNode->processVarDecls(&newExec);
-        res = progNode->execute(&newExec);
-    }
-    
-    m_recursion--;
-    
-    if (shouldPrintExceptions() && res.complType() == Throw) {
-        JSLock lock;
-        ExecState* exec = globalExec();
-        CString f = sourceURL.UTF8String();
-        CString message = res.value()->toObject(exec)->toString(exec).UTF8String();
-        int line = res.value()->toObject(exec)->get(exec, "line")->toUInt32(exec);
-#if PLATFORM(WIN_OS)
-        printf("%s line %d: %s\n", f.c_str(), line, message.c_str());
-#else
-        printf("[%d] %s line %d: %s\n", getpid(), f.c_str(), line, message.c_str());
-#endif
-    }
-
-    return res;
+  return rep->builtinBoolean();
 }
 
-JSObject *Interpreter::builtinObject() const
+Object Interpreter::builtinString() const
 {
-  return m_Object;
+  return rep->builtinString();
 }
 
-JSObject *Interpreter::builtinFunction() const
+Object Interpreter::builtinNumber() const
 {
-  return m_Function;
+  return rep->builtinNumber();
 }
 
-JSObject *Interpreter::builtinArray() const
+Object Interpreter::builtinDate() const
 {
-  return m_Array;
+  return rep->builtinDate();
 }
 
-JSObject *Interpreter::builtinBoolean() const
+Object Interpreter::builtinRegExp() const
 {
-  return m_Boolean;
+  return rep->builtinRegExp();
 }
 
-JSObject *Interpreter::builtinString() const
+Object Interpreter::builtinError() const
 {
-  return m_String;
+  return rep->builtinError();
 }
 
-JSObject *Interpreter::builtinNumber() const
+Object Interpreter::builtinObjectPrototype() const
 {
-  return m_Number;
+  return rep->builtinObjectPrototype();
 }
 
-JSObject *Interpreter::builtinDate() const
+Object Interpreter::builtinFunctionPrototype() const
 {
-  return m_Date;
+  return rep->builtinFunctionPrototype();
 }
 
-JSObject *Interpreter::builtinRegExp() const
+Object Interpreter::builtinArrayPrototype() const
 {
-  return m_RegExp;
+  return rep->builtinArrayPrototype();
 }
 
-JSObject *Interpreter::builtinError() const
+Object Interpreter::builtinBooleanPrototype() const
 {
-  return m_Error;
+  return rep->builtinBooleanPrototype();
 }
 
-JSObject *Interpreter::builtinObjectPrototype() const
+Object Interpreter::builtinStringPrototype() const
 {
-  return m_ObjectPrototype;
+  return rep->builtinStringPrototype();
 }
 
-JSObject *Interpreter::builtinFunctionPrototype() const
+Object Interpreter::builtinNumberPrototype() const
 {
-  return m_FunctionPrototype;
+  return rep->builtinNumberPrototype();
 }
 
-JSObject *Interpreter::builtinArrayPrototype() const
+Object Interpreter::builtinDatePrototype() const
 {
-  return m_ArrayPrototype;
+  return rep->builtinDatePrototype();
 }
 
-JSObject *Interpreter::builtinBooleanPrototype() const
+Object Interpreter::builtinRegExpPrototype() const
 {
-  return m_BooleanPrototype;
+  return rep->builtinRegExpPrototype();
 }
 
-JSObject *Interpreter::builtinStringPrototype() const
+Object Interpreter::builtinErrorPrototype() const
 {
-  return m_StringPrototype;
+  return rep->builtinErrorPrototype();
 }
 
-JSObject *Interpreter::builtinNumberPrototype() const
+Object Interpreter::builtinEvalError() const
 {
-  return m_NumberPrototype;
+  return rep->builtinEvalError();
 }
 
-JSObject *Interpreter::builtinDatePrototype() const
+Object Interpreter::builtinRangeError() const
 {
-  return m_DatePrototype;
+  return rep->builtinRangeError();
 }
 
-JSObject *Interpreter::builtinRegExpPrototype() const
+Object Interpreter::builtinReferenceError() const
 {
-  return m_RegExpPrototype;
+  return rep->builtinReferenceError();
 }
 
-JSObject *Interpreter::builtinErrorPrototype() const
+Object Interpreter::builtinSyntaxError() const
 {
-  return m_ErrorPrototype;
+  return rep->builtinSyntaxError();
 }
 
-JSObject *Interpreter::builtinEvalError() const
+Object Interpreter::builtinTypeError() const
 {
-  return m_EvalError;
+  return rep->builtinTypeError();
 }
 
-JSObject *Interpreter::builtinRangeError() const
+Object Interpreter::builtinURIError() const
 {
-  return m_RangeError;
+  return rep->builtinURIError();
 }
 
-JSObject *Interpreter::builtinReferenceError() const
+Object Interpreter::builtinEvalErrorPrototype() const
 {
-  return m_ReferenceError;
+  return rep->builtinEvalErrorPrototype();
 }
 
-JSObject *Interpreter::builtinSyntaxError() const
+Object Interpreter::builtinRangeErrorPrototype() const
 {
-  return m_SyntaxError;
+  return rep->builtinRangeErrorPrototype();
 }
 
-JSObject *Interpreter::builtinTypeError() const
+Object Interpreter::builtinReferenceErrorPrototype() const
 {
-  return m_TypeError;
+  return rep->builtinReferenceErrorPrototype();
 }
 
-JSObject *Interpreter::builtinURIError() const
+Object Interpreter::builtinSyntaxErrorPrototype() const
 {
-  return m_UriError;
+  return rep->builtinSyntaxErrorPrototype();
 }
 
-JSObject *Interpreter::builtinEvalErrorPrototype() const
+Object Interpreter::builtinTypeErrorPrototype() const
 {
-  return m_EvalErrorPrototype;
+  return rep->builtinTypeErrorPrototype();
 }
 
-JSObject *Interpreter::builtinRangeErrorPrototype() const
+Object Interpreter::builtinURIErrorPrototype() const
 {
-  return m_RangeErrorPrototype;
+  return rep->builtinURIErrorPrototype();
 }
 
-JSObject *Interpreter::builtinReferenceErrorPrototype() const
+void Interpreter::setCompatMode(CompatMode mode)
 {
-  return m_ReferenceErrorPrototype;
+  rep->setCompatMode(mode);
 }
 
-JSObject *Interpreter::builtinSyntaxErrorPrototype() const
+Interpreter::CompatMode Interpreter::compatMode() const
 {
-  return m_SyntaxErrorPrototype;
-}
-
-JSObject *Interpreter::builtinTypeErrorPrototype() const
-{
-  return m_TypeErrorPrototype;
-}
-
-JSObject *Interpreter::builtinURIErrorPrototype() const
-{
-  return m_UriErrorPrototype;
-}
-
-void Interpreter::mark(bool)
-{
-    if (m_context)
-        m_context->mark();
-    if (m_globalObject && !m_globalObject->marked())
-        m_globalObject->mark();
-    if (m_globalExec.exception() && !m_globalExec.exception()->marked())
-        m_globalExec.exception()->mark();
-}
-
-Interpreter* Interpreter::interpreterWithGlobalObject(JSObject* globalObject)
-{
-    return interpreterMap().get(globalObject);
+  return rep->compatMode();
 }
 
 #ifdef KJS_DEBUG_MEM
@@ -636,7 +304,11 @@ Interpreter* Interpreter::interpreterWithGlobalObject(JSObject* globalObject)
 void Interpreter::finalCheck()
 {
   fprintf(stderr,"Interpreter::finalCheck()\n");
-  Collector::collect();
+  // Garbage collect - as many times as necessary
+  // (we could delete an object which was holding another object, so
+  // the deref() will happen too late for deleting the impl of the 2nd object).
+  while( Collector::collect() )
+    ;
 
   Node::finalCheck();
   Collector::finalCheck();
@@ -645,6 +317,7 @@ void Interpreter::finalCheck()
 }
 #endif
 
+#if APPLE_CHANGES
 static bool printExceptions = false;
 
 bool Interpreter::shouldPrintExceptions()
@@ -656,146 +329,7 @@ void Interpreter::setShouldPrintExceptions(bool print)
 {
   printExceptions = print;
 }
-
-// bindings are OS X WebKit-only for now
-#if PLATFORM(MAC)
-#if BINDINGS
-void *Interpreter::createLanguageInstanceForValue(ExecState *exec, int language, JSObject *value, const Bindings::RootObject *origin, const Bindings::RootObject *current)
-{
-    return Bindings::Instance::createLanguageInstanceForValue (exec, (Bindings::Instance::BindingLanguage)language, value, origin, current);
-}
-#endif
 #endif
 
-void Interpreter::saveBuiltins (SavedBuiltins& builtins) const
-{
-    if (!builtins._internal)
-        builtins._internal = new SavedBuiltinsInternal;
-    
-    builtins._internal->m_Object = m_Object;
-    builtins._internal->m_Function = m_Function;
-    builtins._internal->m_Array = m_Array;
-    builtins._internal->m_Boolean = m_Boolean;
-    builtins._internal->m_String = m_String;
-    builtins._internal->m_Number = m_Number;
-    builtins._internal->m_Date = m_Date;
-    builtins._internal->m_RegExp = m_RegExp;
-    builtins._internal->m_Error = m_Error;
-    
-    builtins._internal->m_ObjectPrototype = m_ObjectPrototype;
-    builtins._internal->m_FunctionPrototype = m_FunctionPrototype;
-    builtins._internal->m_ArrayPrototype = m_ArrayPrototype;
-    builtins._internal->m_BooleanPrototype = m_BooleanPrototype;
-    builtins._internal->m_StringPrototype = m_StringPrototype;
-    builtins._internal->m_NumberPrototype = m_NumberPrototype;
-    builtins._internal->m_DatePrototype = m_DatePrototype;
-    builtins._internal->m_RegExpPrototype = m_RegExpPrototype;
-    builtins._internal->m_ErrorPrototype = m_ErrorPrototype;
-    
-    builtins._internal->m_EvalError = m_EvalError;
-    builtins._internal->m_RangeError = m_RangeError;
-    builtins._internal->m_ReferenceError = m_ReferenceError;
-    builtins._internal->m_SyntaxError = m_SyntaxError;
-    builtins._internal->m_TypeError = m_TypeError;
-    builtins._internal->m_UriError = m_UriError;
-    
-    builtins._internal->m_EvalErrorPrototype = m_EvalErrorPrototype;
-    builtins._internal->m_RangeErrorPrototype = m_RangeErrorPrototype;
-    builtins._internal->m_ReferenceErrorPrototype = m_ReferenceErrorPrototype;
-    builtins._internal->m_SyntaxErrorPrototype = m_SyntaxErrorPrototype;
-    builtins._internal->m_TypeErrorPrototype = m_TypeErrorPrototype;
-    builtins._internal->m_UriErrorPrototype = m_UriErrorPrototype;
-}
-
-void Interpreter::restoreBuiltins (const SavedBuiltins& builtins)
-{
-    if (!builtins._internal)
-        return;
-
-    m_Object = builtins._internal->m_Object;
-    m_Function = builtins._internal->m_Function;
-    m_Array = builtins._internal->m_Array;
-    m_Boolean = builtins._internal->m_Boolean;
-    m_String = builtins._internal->m_String;
-    m_Number = builtins._internal->m_Number;
-    m_Date = builtins._internal->m_Date;
-    m_RegExp = builtins._internal->m_RegExp;
-    m_Error = builtins._internal->m_Error;
-    
-    m_ObjectPrototype = builtins._internal->m_ObjectPrototype;
-    m_FunctionPrototype = builtins._internal->m_FunctionPrototype;
-    m_ArrayPrototype = builtins._internal->m_ArrayPrototype;
-    m_BooleanPrototype = builtins._internal->m_BooleanPrototype;
-    m_StringPrototype = builtins._internal->m_StringPrototype;
-    m_NumberPrototype = builtins._internal->m_NumberPrototype;
-    m_DatePrototype = builtins._internal->m_DatePrototype;
-    m_RegExpPrototype = builtins._internal->m_RegExpPrototype;
-    m_ErrorPrototype = builtins._internal->m_ErrorPrototype;
-    
-    m_EvalError = builtins._internal->m_EvalError;
-    m_RangeError = builtins._internal->m_RangeError;
-    m_ReferenceError = builtins._internal->m_ReferenceError;
-    m_SyntaxError = builtins._internal->m_SyntaxError;
-    m_TypeError = builtins._internal->m_TypeError;
-    m_UriError = builtins._internal->m_UriError;
-    
-    m_EvalErrorPrototype = builtins._internal->m_EvalErrorPrototype;
-    m_RangeErrorPrototype = builtins._internal->m_RangeErrorPrototype;
-    m_ReferenceErrorPrototype = builtins._internal->m_ReferenceErrorPrototype;
-    m_SyntaxErrorPrototype = builtins._internal->m_SyntaxErrorPrototype;
-    m_TypeErrorPrototype = builtins._internal->m_TypeErrorPrototype;
-    m_UriErrorPrototype = builtins._internal->m_UriErrorPrototype;
-}
-
-void Interpreter::startTimeoutCheck()
-{
-    if (!m_timeoutChecker)
-        m_timeoutChecker = new TimeoutChecker;
-    
-    m_timeoutChecker->startTimeoutCheck(this);
-}
-
-void Interpreter::stopTimeoutCheck()
-{
-    ASSERT(m_timeoutChecker);
-    
-    m_timeoutChecker->stopTimeoutCheck(this);
-}
-
-void Interpreter::pauseTimeoutCheck()
-{
-    ASSERT(m_timeoutChecker);
-    
-    m_timeoutChecker->pauseTimeoutCheck(this);
-}
-
-void Interpreter::resumeTimeoutCheck()
-{
-    ASSERT(m_timeoutChecker);
-
-    m_timeoutChecker->resumeTimeoutCheck(this);
-}
-
-bool Interpreter::handleTimeout()
-{
-    m_timedOut = false;
-
-    pauseTimeoutCheck();
-    bool retval = shouldInterruptScript();
-    resumeTimeoutCheck();
-    
-    return retval;
-}
-
-
-SavedBuiltins::SavedBuiltins() : 
-  _internal(0)
-{
-}
-
-SavedBuiltins::~SavedBuiltins()
-{
-  delete _internal;
-}
-
-}
+void Interpreter::virtual_hook( int, void* )
+{ /*BASE::virtual_hook( id, data );*/ }

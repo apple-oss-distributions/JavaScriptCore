@@ -15,41 +15,42 @@
  *
  *  You should have received a copy of the GNU Lesser General Public
  *  License along with this library; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+ *  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  */
 
-#ifndef REGEXP_OBJECT_H_
-#define REGEXP_OBJECT_H_
+#ifndef _REGEXP_OBJECT_H_
+#define _REGEXP_OBJECT_H_
 
+#include "internal.h"
 #include "function_object.h"
 #include "regexp.h"
 
 namespace KJS {
   class ExecState;
-  class RegExpPrototype : public JSObject {
+  class RegExpPrototypeImp : public ObjectImp {
   public:
-    RegExpPrototype(ExecState *exec,
-                       ObjectPrototype *objProto,
-                       FunctionPrototype *funcProto);
-    virtual const ClassInfo *classInfo() const { return &info; }
-    static const ClassInfo info;
+    RegExpPrototypeImp(ExecState *exec,
+                       ObjectPrototypeImp *objProto,
+                       FunctionPrototypeImp *funcProto);
   };
 
-  class RegExpProtoFunc : public InternalFunctionImp {
+  class RegExpProtoFuncImp : public InternalFunctionImp {
   public:
-    RegExpProtoFunc(ExecState*, FunctionPrototype*, int i, int len, const Identifier&);
+    RegExpProtoFuncImp(ExecState *exec,
+                       FunctionPrototypeImp *funcProto, int i, int len);
 
-    virtual JSValue *callAsFunction(ExecState *exec, JSObject *thisObj, const List &args);
+    virtual bool implementsCall() const;
+    virtual Value call(ExecState *exec, Object &thisObj, const List &args);
 
     enum { Exec, Test, ToString };
   private:
     int id;
   };
 
-  class RegExpImp : public JSObject {
+  class RegExpImp : public ObjectImp {
   public:
-    RegExpImp(RegExpPrototype *regexpProto);
+    RegExpImp(RegExpPrototypeImp *regexpProto);
     ~RegExpImp();
     void setRegExp(RegExp *r) { reg = r; }
     RegExp* regExp() const { return reg; }
@@ -62,40 +63,25 @@ namespace KJS {
 
   class RegExpObjectImp : public InternalFunctionImp {
   public:
-    enum { Dollar1, Dollar2, Dollar3, Dollar4, Dollar5, Dollar6, Dollar7, Dollar8, Dollar9, 
-           Input, Multiline, LastMatch, LastParen, LeftContext, RightContext };
-    
     RegExpObjectImp(ExecState *exec,
-                    FunctionPrototype *funcProto,
-                    RegExpPrototype *regProto);
+                    FunctionPrototypeImp *funcProto,
+                    RegExpPrototypeImp *regProto);
+    virtual ~RegExpObjectImp();
     virtual bool implementsConstruct() const;
-    virtual JSObject *construct(ExecState *exec, const List &args);
-    virtual JSValue *callAsFunction(ExecState *exec, JSObject *thisObj, const List &args);
+    virtual Object construct(ExecState *exec, const List &args);
+    virtual bool implementsCall() const;
+    virtual Value call(ExecState *exec, Object &thisObj, const List &args);
 
-    virtual void put(ExecState *, const Identifier &, JSValue *, int attr = None);
-    void putValueProperty(ExecState *, int token, JSValue *, int attr);
-    virtual bool getOwnPropertySlot(ExecState *, const Identifier&, PropertySlot&);
-    JSValue *getValueProperty(ExecState *, int token) const;
-    UString performMatch(RegExp *, const UString&, int startOffset = 0, int *endOffset = 0, int **ovector = 0);
-    JSObject *arrayOfMatches(ExecState *exec, const UString &result) const;
-    
-    virtual const ClassInfo *classInfo() const { return &info; }
+    Value get(ExecState *exec, const Identifier &p) const;
+    int ** registerRegexp( const RegExp* re, const UString& s );
+    void setSubPatterns(int num) { lastNrSubPatterns = num; }
+    Object arrayOfMatches(ExecState *exec, const UString &result) const;
   private:
-    JSValue *getBackref(unsigned) const;
-    JSValue *getLastMatch() const;
-    JSValue *getLastParen() const;
-    JSValue *getLeftContext() const;
-    JSValue *getRightContext() const;
-
-    // Global search cache / settings
-    bool multiline;
-    UString lastInput;
-    OwnArrayPtr<int> lastOvector;
-    unsigned lastNumSubPatterns;
-    
-    static const ClassInfo info;
+    UString lastString;
+    int *lastOvector;
+    uint lastNrSubPatterns;
   };
 
-} // namespace
+}; // namespace
 
 #endif

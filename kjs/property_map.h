@@ -1,7 +1,7 @@
 // -*- c-basic-offset: 2 -*-
 /*
  *  This file is part of the KDE libraries
- *  Copyright (C) 2004, 2005, 2006 Apple Computer, Inc.
+ *  Copyright (C) 2003 Apple Computer, Inc.
  *
  *  This library is free software; you can redistribute it and/or
  *  modify it under the terms of the GNU Library General Public
@@ -15,30 +15,26 @@
  *
  *  You should have received a copy of the GNU Library General Public License
  *  along with this library; see the file COPYING.LIB.  If not, write to
- *  the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- *  Boston, MA 02110-1301, USA.
+ *  the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ *  Boston, MA 02111-1307, USA.
  *
  */
 
-#ifndef KJS_PROPERTY_MAP_H_
-#define KJS_PROPERTY_MAP_H_
+#ifndef _KJS_PROPERTY_MAP_H_
+#define _KJS_PROPERTY_MAP_H_
 
 #include "identifier.h"
-#include <wtf/OwnArrayPtr.h>
 
 namespace KJS {
 
-    class PropertyNameArray;
-    class JSObject;
-    class JSValue;
+    class Object;
+    class ReferenceList;
+    class ValueImp;
     
     class SavedProperty;
     
     struct PropertyMapHashTable;
     
-/**
-* Saved Properties
-*/
     class SavedProperties {
     friend class PropertyMap;
     public:
@@ -47,25 +43,21 @@ namespace KJS {
         
     private:
         int _count;
-        OwnArrayPtr<SavedProperty> _properties;
+        SavedProperty *_properties;
+        
+        SavedProperties(const SavedProperties&);
+        SavedProperties& operator=(const SavedProperties&);
     };
     
-/**
-* A hashtable entry for the @ref PropertyMap.
-*/
     struct PropertyMapHashTableEntry
     {
         PropertyMapHashTableEntry() : key(0) { }
         UString::Rep *key;
-        JSValue *value;
-        short attributes;
-        short globalGetterSetterFlag;
+        ValueImp *value;
+        int attributes;
         int index;
     };
 
-/**
-* Javascript Property Map.
-*/
     class PropertyMap {
     public:
         PropertyMap();
@@ -73,30 +65,23 @@ namespace KJS {
 
         void clear();
         
-        void put(const Identifier &name, JSValue *value, int attributes, bool roCheck = false);
+        void put(const Identifier &name, ValueImp *value, int attributes);
         void remove(const Identifier &name);
-        JSValue *get(const Identifier &name) const;
-        JSValue *get(const Identifier &name, unsigned &attributes) const;
-        JSValue **getLocation(const Identifier &name);
+        ValueImp *get(const Identifier &name) const;
+        ValueImp *get(const Identifier &name, int &attributes) const;
 
         void mark() const;
-        void getEnumerablePropertyNames(PropertyNameArray&) const;
-        void getSparseArrayPropertyNames(PropertyNameArray&) const;
+        void addEnumerablesToReferenceList(ReferenceList &, const Object &) const;
+	void addSparseArrayPropertiesToReferenceList(ReferenceList &, const Object &) const;
 
         void save(SavedProperties &) const;
         void restore(const SavedProperties &p);
 
-        bool hasGetterSetterProperties() const { return _singleEntry.globalGetterSetterFlag; }
-        void setHasGetterSetterProperties(bool f) { _singleEntry.globalGetterSetterFlag = f; }
-
-        bool containsGettersOrSetters() const;
     private:
         static bool keysMatch(const UString::Rep *, const UString::Rep *);
         void expand();
-        void rehash();
-        void rehash(int newTableSize);
         
-        void insert(UString::Rep *, JSValue *value, int attributes, int index);
+        void insert(UString::Rep *, ValueImp *value, int attributes, int index);
         
         void checkConsistency();
         
@@ -108,11 +93,6 @@ namespace KJS {
         Entry _singleEntry;
     };
 
-inline PropertyMap::PropertyMap() : _table(0)
-{
-    _singleEntry.globalGetterSetterFlag = 0;
-}
-
-} // namespace
+}; // namespace
 
 #endif // _KJS_PROPERTY_MAP_H_

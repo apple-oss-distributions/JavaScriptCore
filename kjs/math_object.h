@@ -15,23 +15,24 @@
  *
  *  You should have received a copy of the GNU Lesser General Public
  *  License along with this library; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+ *  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  */
 
-#ifndef MATH_OBJECT_H_
-#define MATH_OBJECT_H_
+#ifndef _MATH_OBJECT_H_
+#define _MATH_OBJECT_H_
 
+#include "internal.h"
 #include "function_object.h"
 
 namespace KJS {
 
-  class MathObjectImp : public JSObject {
+  class MathObjectImp : public ObjectImp {
   public:
     MathObjectImp(ExecState *exec,
-                  ObjectPrototype *objProto);
-    bool getOwnPropertySlot(ExecState *, const Identifier&, PropertySlot&);
-    JSValue *getValueProperty(ExecState *exec, int token) const;
+                  ObjectPrototypeImp *objProto);
+    Value get(ExecState *exec, const Identifier &p) const;
+    Value getValueProperty(ExecState *exec, int token) const;
     virtual const ClassInfo *classInfo() const { return &info; }
     static const ClassInfo info;
     enum { Euler, Ln2, Ln10, Log2E, Log10E, Pi, Sqrt1_2, Sqrt2,
@@ -41,12 +42,13 @@ namespace KJS {
 
   class MathFuncImp : public InternalFunctionImp {
   public:
-    MathFuncImp(ExecState *exec, int i, int l, const Identifier&);
-    virtual JSValue *callAsFunction(ExecState *exec, JSObject *thisObj, const List &args);
+    MathFuncImp(ExecState *exec, int i, int l);
+    virtual bool implementsCall() const;
+    virtual Value call(ExecState *exec, Object &thisObj, const List &args);
   private:
     int id;
   };
 
-} // namespace
+}; // namespace
 
 #endif

@@ -15,8 +15,8 @@
  *
  *  You should have received a copy of the GNU Library General Public License
  *  along with this library; see the file COPYING.LIB.  If not, write to
- *  the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- *  Boston, MA 02110-1301, USA.
+ *  the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ *  Boston, MA 02111-1307, USA.
  *
  */
 
@@ -30,7 +30,7 @@ namespace KJS {
     struct ListImpBase {
         int size;
         int refCount;
-        int valueRefCount; // FIXME: Get rid of this.
+	int valueRefCount;
     };
     
     class ListIterator;
@@ -48,13 +48,14 @@ namespace KJS {
     class List {
     public:
         List();
-        List(bool needsMarking);
+	List(bool needsMarking);
         ~List() { deref(); }
 
         List(const List &b) : _impBase(b._impBase), _needsMarking(false) {
-            ++_impBase->refCount; 
-            ++_impBase->valueRefCount; 
-        }
+	    ++_impBase->refCount; 
+	    if (!_impBase->valueRefCount) refValues(); 
+	    ++_impBase->valueRefCount; 
+	}
         List &operator=(const List &);
 
         /**
@@ -62,7 +63,8 @@ namespace KJS {
          *
          * @param val Pointer to object.
          */
-        void append(JSValue *val);
+        void append(const Value& val) { append(val.imp()); }
+        void append(ValueImp *val);
         /**
          * Remove all elements from the list.
          */
@@ -72,11 +74,6 @@ namespace KJS {
          * Make a copy of the list
          */
         List copy() const;
-
-        /**
-         * Copy all elements from the second list here
-         */
-        void copyFrom(const List& other);
 
         /**
          * Make a copy of the list, omitting the first element.
@@ -92,49 +89,51 @@ namespace KJS {
          */
         int size() const { return _impBase->size; }
         /**
-         * @return A KJS::ListIterator pointing to the first element.
+         * @return A @ref KJS::ListIterator pointing to the first element.
          */
         ListIterator begin() const;
         /**
-         * @return A KJS::ListIterator pointing to the last element.
+         * @return A @ref KJS::ListIterator pointing to the last element.
          */
         ListIterator end() const;
         
         /**
          * Retrieve an element at an indexed position. If you want to iterate
-         * trough the whole list using KJS::ListIterator will be faster.
+         * trough the whole list using @ref KJS::ListIterator will be faster.
          *
          * @param i List index.
-         * @return Return the element at position i. KJS::Undefined if the
+         * @return Return the element at position i. @ref KJS::Undefined if the
          * index is out of range.
          */
-        JSValue *at(int i) const;
+        Value at(int i) const { return Value(impAt(i)); }
         /**
-         * Equivalent to at.
+         * Equivalent to @ref at.
          */
-        JSValue *operator[](int i) const { return at(i); }
+        Value operator[](int i) const { return Value(impAt(i)); }
+        
+        ValueImp *impAt(int i) const;
     
         /**
          * Returns a pointer to a static instance of an empty list. Useful if a
-         * function has a KJS::List parameter.
+         * function has a @ref KJS::List parameter.
          */
         static const List &empty();
         
-        void mark() { if (_impBase->valueRefCount == 0) markValues(); }
-
-        static void markProtectedLists();
+	void mark() { if (_impBase->valueRefCount == 0) markValues(); }
     private:
         ListImpBase *_impBase;
-        bool _needsMarking;
+	bool _needsMarking;
         
-        void deref() { if (!_needsMarking) --_impBase->valueRefCount; if (--_impBase->refCount == 0) release(); }
+        void deref() { if (!_needsMarking && --_impBase->valueRefCount == 0) derefValues(); if (--_impBase->refCount == 0) release(); }
 
         void release();
+        void refValues();
+        void derefValues();
         void markValues();
     };
   
     /**
-     * @short Iterator for KJS::List objects.
+     * @short Iterator for @ref KJS::List objects.
      */
     class ListIterator {
     public:
@@ -148,25 +147,25 @@ namespace KJS {
          * Dereference the iterator.
          * @return A pointer to the element the iterator operates on.
          */
-        JSValue *operator->() const { return _list->at(_i); }
-        JSValue *operator*() const { return _list->at(_i); }
+        ValueImp *operator->() const { return _list->impAt(_i); }
+        Value operator*() const { return Value(_list->impAt(_i)); }
         /**
          * Prefix increment operator.
          * @return The element after the increment.
          */
-        JSValue *operator++() { return _list->at(++_i); }
+        Value operator++() { return Value(_list->impAt(++_i)); }
         /**
          * Postfix increment operator.
          */
-        JSValue *operator++(int) { return _list->at(_i++); }
+        Value operator++(int) { return Value(_list->impAt(_i++)); }
         /**
          * Prefix decrement operator.
          */
-        JSValue *operator--() { return _list->at(--_i); }
+        Value operator--() { return Value(_list->impAt(--_i)); }
         /**
          * Postfix decrement operator.
          */
-        JSValue *operator--(int) { return _list->at(_i--); }
+        Value operator--(int) { return Value(_list->impAt(_i--)); }
         /**
          * Compare the iterator with another one.
          * @return True if the two iterators operate on the same list element.
@@ -187,6 +186,22 @@ namespace KJS {
     inline ListIterator List::begin() const { return ListIterator(*this); }
     inline ListIterator List::end() const { return ListIterator(*this, size()); }
  
-} // namespace KJS
+    inline List &List::operator=(const List &b)
+    {
+        ListImpBase *bImpBase = b._impBase;
+        ++bImpBase->refCount;
+        deref();
+        _impBase = bImpBase;
+	if (!_needsMarking) {
+	    if (!_impBase->valueRefCount) {
+		refValues();
+	    }
+	    _impBase->valueRefCount++;
+	}
+
+        return *this;
+    }
+
+ }; // namespace KJS
 
 #endif // KJS_LIST_H

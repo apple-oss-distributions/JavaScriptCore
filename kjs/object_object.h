@@ -15,7 +15,7 @@
  *
  *  You should have received a copy of the GNU Lesser General Public
  *  License along with this library; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+ *  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  */
 
@@ -26,7 +26,7 @@
 
 namespace KJS {
 
-  class FunctionPrototype;
+  class FunctionPrototypeImp;
 
   /**
    * @internal
@@ -34,9 +34,9 @@ namespace KJS {
    * The initial value of Object.prototype (and thus all objects created
    * with the Object constructor
    */
-  class ObjectPrototype : public JSObject {
+  class ObjectPrototypeImp : public ObjectImp {
   public:
-    ObjectPrototype(ExecState *exec, FunctionPrototype *funcProto);
+    ObjectPrototypeImp(ExecState *exec, FunctionPrototypeImp *funcProto);
   };
 
   /**
@@ -45,14 +45,15 @@ namespace KJS {
    * Class to implement all methods that are properties of the
    * Object.prototype object
    */
-  class ObjectProtoFunc : public InternalFunctionImp {
+  class ObjectProtoFuncImp : public InternalFunctionImp {
   public:
-    ObjectProtoFunc(ExecState* exec, FunctionPrototype* funcProto, int i, int len, const Identifier&);
+    ObjectProtoFuncImp(ExecState *exec, FunctionPrototypeImp *funcProto,
+                       int i, int len);
 
-    virtual JSValue *callAsFunction(ExecState *, JSObject *, const List &args);
+    virtual bool implementsCall() const;
+    virtual Value call(ExecState *exec, Object &thisObj, const List &args);
 
-    enum { ToString, ToLocaleString, ValueOf, HasOwnProperty, IsPrototypeOf, PropertyIsEnumerable,
-           DefineGetter, DefineSetter, LookupGetter, LookupSetter };
+    enum { ToString, ValueOf };
   private:
     int id;
   };
@@ -66,14 +67,15 @@ namespace KJS {
   public:
 
     ObjectObjectImp(ExecState *exec,
-                    ObjectPrototype *objProto,
-                    FunctionPrototype *funcProto);
+                    ObjectPrototypeImp *objProto,
+                    FunctionPrototypeImp *funcProto);
 
     virtual bool implementsConstruct() const;
-    virtual JSObject *construct(ExecState *, const List &args);
-    virtual JSValue *callAsFunction(ExecState *, JSObject *, const List &args);
+    virtual Object construct(ExecState *exec, const List &args);
+    virtual bool implementsCall() const;
+    virtual Value call(ExecState *exec, Object &thisObj, const List &args);
   };
 
-} // namespace
+}; // namespace
 
 #endif

@@ -15,8 +15,8 @@
  *
  *  You should have received a copy of the GNU Library General Public License
  *  along with this library; see the file COPYING.LIB.  If not, write to
- *  the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- *  Boston, MA 02110-1301, USA.
+ *  the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ *  Boston, MA 02111-1307, USA.
  *
  */
 
@@ -25,10 +25,7 @@
 
 #include "ustring.h"
 
-
 namespace KJS {
-
-  class Identifier;
 
   class RegExp;
 
@@ -38,21 +35,16 @@ namespace KJS {
     ~Lexer();
     static Lexer *curr();
 
-    void setCode(const UString &sourceURL, int startingLineNumber, const UChar *c, unsigned int len);
+    void setCode(const UChar *c, unsigned int len);
     int lex();
 
-    int lineNo() const { return yylineno; }
-    UString sourceURL() const { return m_sourceURL; }
+    int lineNo() const { return yylineno + 1; }
 
     bool prevTerminator() const { return terminator; }
 
     enum State { Start,
-                 IdentifierOrKeyword,
                  Identifier,
-                 InIdentifierOrKeyword,
                  InIdentifier,
-                 InIdentifierUnicodeEscapeStart,
-                 InIdentifierUnicodeEscape,
                  InSingleLineComment,
                  InMultiLineComment,
                  InNum,
@@ -79,7 +71,6 @@ namespace KJS {
 
   private:
     int yylineno;
-    UString m_sourceURL;
     bool done;
     char *buffer8;
     UChar *buffer16;
@@ -104,6 +95,7 @@ namespace KJS {
 
     bool isWhiteSpace() const;
     bool isLineTerminator();
+    bool isHexDigit(unsigned short c) const;
     bool isOctalDigit(unsigned short c) const;
 
     int matchPunctuator(unsigned short c1, unsigned short c2,
@@ -116,9 +108,8 @@ namespace KJS {
     static unsigned char convertHex(unsigned short c1, unsigned short c2);
     static UChar convertUnicode(unsigned short c1, unsigned short c2,
                                 unsigned short c3, unsigned short c4);
-    static bool isIdentStart(unsigned short c);
-    static bool isIdentPart(unsigned short c);
-    static bool isHexDigit(unsigned short c);
+    static bool isIdentLetter(unsigned short c);
+    static bool isDecimalDigit(unsigned short c);
 
 #ifdef KJS_DEBUG_MEM
     /**
@@ -126,18 +117,10 @@ namespace KJS {
      */
     static void globalClear();
 #endif
-
-    bool sawError() const { return error; }
-    void doneParsing();
-
   private:
 
     void record8(unsigned short c);
-    void record16(int c);
     void record16(UChar c);
-
-    KJS::Identifier *makeIdentifier(UChar *buffer, unsigned int pos);
-    UString *makeUString(UChar *buffer, unsigned int pos);
 
     const UChar *code;
     unsigned int length;
@@ -145,24 +128,15 @@ namespace KJS {
 #ifndef KJS_PURE_ECMA
     int bol;     // begin of line
 #endif
-    bool error;
 
-    // current and following unicode characters (int to allow for -1 for end-of-file marker)
-    int current, next1, next2, next3;
-
-    UString **strings;
-    unsigned int numStrings;
-    unsigned int stringsCapacity;
-
-    KJS::Identifier **identifiers;
-    unsigned int numIdentifiers;
-    unsigned int identifiersCapacity;
+    // current and following unicode characters
+    unsigned short current, next1, next2, next3;
 
     // for future extensions
     class LexerPrivate;
     LexerPrivate *priv;
   };
 
-} // namespace
+}; // namespace
 
 #endif

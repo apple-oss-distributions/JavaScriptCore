@@ -15,240 +15,246 @@
  *
  *  You should have received a copy of the GNU Library General Public License
  *  along with this library; see the file COPYING.LIB.  If not, write to
- *  the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- *  Boston, MA 02110-1301, USA.
+ *  the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ *  Boston, MA 02111-1307, USA.
  *
  */
 
+#ifdef HAVE_CONFIG_H
 #include "config.h"
-#include "operations.h"
-
-#include "object.h"
-#include <math.h>
-#include <stdio.h>
-#include <wtf/MathExtras.h>
-
-#if HAVE(FUNC_ISINF) && HAVE(IEEEFP_H)
-#include <ieeefp.h>
+#endif
+#ifndef HAVE_FLOAT_H   /* just for !Windows */
+#define HAVE_FLOAT_H 0
+#define HAVE_FUNC__FINITE 0
 #endif
 
-#if HAVE(FLOAT_H)
+#include <stdio.h>
+#include <assert.h>
+#include <math.h>
+#include <stdlib.h>
+
+#ifndef HAVE_FUNC_ISINF
+#ifdef HAVE_IEEEFP_H
+#include <ieeefp.h>
+#endif
+#endif /* HAVE_FUNC_ISINF */
+
+#if HAVE_FLOAT_H
 #include <float.h>
 #endif
 
-namespace KJS {
-    
-#if !PLATFORM(DARWIN)
+#include "operations.h"
+#include "object.h"
 
-// FIXME: Should probably be inlined on non-Darwin platforms too, and controlled exclusively
-// by HAVE macros rather than PLATFORM.
+using namespace KJS;
 
-// FIXME: Merge with isnan in MathExtras.h and remove this one entirely.
-bool isNaN(double d)
+bool KJS::isNaN(double d)
 {
-#if HAVE(FUNC_ISNAN)
-    return isnan(d);
-#elif HAVE(FLOAT_H)
-    return _isnan(d) != 0;
+#ifdef HAVE_FUNC_ISNAN
+  return isnan(d);
+#elif defined HAVE_FLOAT_H
+  return _isnan(d) != 0;
 #else
-    return !(d == d);
+  return !(d == d);
 #endif
 }
 
-// FIXME: Merge with isinf in MathExtras.h and remove this one entirely.
-bool isInf(double d)
+bool KJS::isInf(double d)
 {
-    // FIXME: should be HAVE(_FPCLASS)
-#if PLATFORM(WIN_OS)
-    int fpClass = _fpclass(d);
-    return _FPCLASS_PINF == fpClass || _FPCLASS_NINF == fpClass;
-#elif HAVE(FUNC_ISINF)
-    return isinf(d);
-#elif HAVE(FUNC_FINITE)
-    return finite(d) == 0 && d == d;
-#elif HAVE(FUNC__FINITE)
-    return _finite(d) == 0 && d == d;
+#if defined(HAVE_FUNC_ISINF)
+  return isinf(d);
+#elif HAVE_FUNC_FINITE
+  return finite(d) == 0 && d == d;
+#elif HAVE_FUNC__FINITE
+  return _finite(d) == 0 && d == d;
 #else
-    return false;
+  return false;
 #endif
 }
 
-bool isPosInf(double d)
+bool KJS::isPosInf(double d)
 {
-    // FIXME: should be HAVE(_FPCLASS)
-#if PLATFORM(WIN_OS)
-    return _FPCLASS_PINF == _fpclass(d);
-#elif HAVE(FUNC_ISINF)
-    return (isinf(d) == 1);
-#elif HAVE(FUNC_FINITE)
-    return !finite(d) && d == d; // ### can we distinguish between + and - ?
-#elif HAVE(FUNC__FINITE)
-    return !_finite(d) && d == d; // ###
+#if defined(HAVE_FUNC_ISINF)
+  return (isinf(d) == 1);
+#elif HAVE_FUNC_FINITE
+  return finite(d) == 0 && d == d; // ### can we distinguish between + and - ?
+#elif HAVE_FUNC__FINITE
+  return _finite(d) == 0 && d == d; // ###
 #else
-    return false;
+  return false;
 #endif
 }
 
-bool isNegInf(double d)
+bool KJS::isNegInf(double d)
 {
-    // FIXME: should be HAVE(_FPCLASS)
-#if PLATFORM(WIN_OS)
-    return _FPCLASS_NINF == _fpclass(d);
-#elif HAVE(FUNC_ISINF)
-    return (isinf(d) == -1);
-#elif HAVE(FUNC_FINITE)
-    return finite(d) == 0 && d == d; // ###
-#elif HAVE(FUNC__FINITE)
-    return _finite(d) == 0 && d == d; // ###
+#if defined(HAVE_FUNC_ISINF)
+  return (isinf(d) == -1);
+#elif HAVE_FUNC_FINITE
+  return finite(d) == 0 && d == d; // ###
+#elif HAVE_FUNC__FINITE
+  return _finite(d) == 0 && d == d; // ###
 #else
-    return false;
+  return false;
 #endif
 }
-
-#endif
 
 // ECMA 11.9.3
-bool equal(ExecState *exec, JSValue *v1, JSValue *v2)
+bool KJS::equal(ExecState *exec, const Value& v1, const Value& v2)
 {
-    JSType t1 = v1->type();
-    JSType t2 = v2->type();
-    
-    if (t1 != t2) {
-        if (t1 == UndefinedType)
-            t1 = NullType;
-        if (t2 == UndefinedType)
-            t2 = NullType;
-        
-        if (t1 == BooleanType)
-            t1 = NumberType;
-        if (t2 == BooleanType)
-            t2 = NumberType;
-        
-        if (t1 == NumberType && t2 == StringType) {
-            // use toNumber
-        } else if (t1 == StringType && t2 == NumberType)
-            t1 = NumberType;
-            // use toNumber
-        else {
-            if ((t1 == StringType || t1 == NumberType) && t2 >= ObjectType)
-                return equal(exec, v1, v2->toPrimitive(exec));
-            if (t1 == NullType && t2 == ObjectType)
-                return static_cast<JSObject *>(v2)->masqueradeAsUndefined();
-            if (t1 >= ObjectType && (t2 == StringType || t2 == NumberType))
-                return equal(exec, v1->toPrimitive(exec), v2);
-            if (t1 == ObjectType && t2 == NullType)
-                return static_cast<JSObject *>(v1)->masqueradeAsUndefined();
-            if (t1 != t2)
-                return false;
-        }
-    }
-    
+  Type t1 = v1.type();
+  Type t2 = v2.type();
+
+  if (t1 == t2) {
     if (t1 == UndefinedType || t1 == NullType)
-        return true;
-    
-    if (t1 == NumberType) {
-        double d1 = v1->toNumber(exec);
-        double d2 = v2->toNumber(exec);
-        return d1 == d2;
+      return true;
+    if (t1 == NumberType)
+    {
+      double d1 = v1.toNumber(exec);
+      double d2 = v2.toNumber(exec);
+      if ( isNaN( d1 ) || isNaN( d2 ) )
+        return false;
+      return ( d1 == d2 ); /* TODO: +0, -0 ? */
     }
-    
     if (t1 == StringType)
-        return v1->toString(exec) == v2->toString(exec);
-    
+      return (v1.toString(exec) == v2.toString(exec));
     if (t1 == BooleanType)
-        return v1->toBoolean(exec) == v2->toBoolean(exec);
-    
+      return (v1.toBoolean(exec) == v2.toBoolean(exec));
+
     // types are Object
-    return v1 == v2;
+    return (v1.imp() == v2.imp());
+  }
+
+  // different types
+  if ((t1 == NullType && t2 == UndefinedType) || (t1 == UndefinedType && t2 == NullType))
+    return true;
+  if (t1 == NumberType && t2 == StringType) {
+    Number n2 = v2.toNumber(exec);
+    return equal(exec,v1, n2);
+  }
+  if ((t1 == StringType && t2 == NumberType) || t1 == BooleanType) {
+    Number n1 = v1.toNumber(exec);
+    return equal(exec,n1, v2);
+  }
+  if (t2 == BooleanType) {
+    Number n2 = v2.toNumber(exec);
+    return equal(exec,v1, n2);
+  }
+  if ((t1 == StringType || t1 == NumberType) && t2 >= ObjectType) {
+    Value p2 = v2.toPrimitive(exec);
+    return equal(exec,v1, p2);
+  }
+  if (t1 >= ObjectType && (t2 == StringType || t2 == NumberType)) {
+    Value p1 = v1.toPrimitive(exec);
+    return equal(exec,p1, v2);
+  }
+
+  return false;
 }
 
-bool strictEqual(ExecState *exec, JSValue *v1, JSValue *v2)
+bool KJS::strictEqual(ExecState *exec, const Value &v1, const Value &v2)
 {
-    JSType t1 = v1->type();
-    JSType t2 = v2->type();
-    
-    if (t1 != t2)
-        return false;
-    if (t1 == UndefinedType || t1 == NullType)
-        return true;
-    if (t1 == NumberType) {
-        double n1 = v1->toNumber(exec);
-        double n2 = v2->toNumber(exec);
-        if (n1 == n2)
-            return true;
-        return false;
-    } else if (t1 == StringType)
-        return v1->toString(exec) == v2->toString(exec);
-    else if (t2 == BooleanType)
-        return v1->toBoolean(exec) == v2->toBoolean(exec);
-    
-    if (v1 == v2)
-        return true;
-    /* TODO: joined objects */
-    
+  Type t1 = v1.type();
+  Type t2 = v2.type();
+
+  if (t1 != t2)
     return false;
+  if (t1 == UndefinedType || t1 == NullType)
+    return true;
+  if (t1 == NumberType) {
+    double n1 = v1.toNumber(exec);
+    double n2 = v2.toNumber(exec);
+    if (isNaN(n1) || isNaN(n2))
+      return false;
+    if (n1 == n2)
+      return true;
+    /* TODO: +0 and -0 */
+    return false;
+  } else if (t1 == StringType) {
+    return v1.toString(exec) == v2.toString(exec);
+  } else if (t2 == BooleanType) {
+    return v1.toBoolean(exec) == v2.toBoolean(exec);
+  }
+  if (v1.imp() == v2.imp())
+    return true;
+  /* TODO: joined objects */
+
+  return false;
 }
 
-int relation(ExecState *exec, JSValue *v1, JSValue *v2)
+int KJS::relation(ExecState *exec, const Value& v1, const Value& v2)
 {
-    JSValue *p1 = v1->toPrimitive(exec,NumberType);
-    JSValue *p2 = v2->toPrimitive(exec,NumberType);
-    
-    if (p1->isString() && p2->isString())
-        return p1->toString(exec) < p2->toString(exec) ? 1 : 0;
-    
-    double n1 = p1->toNumber(exec);
-    double n2 = p2->toNumber(exec);
-    if (n1 < n2)
-        return 1;
-    if (n1 >= n2)
-        return 0;
-    return -1; // must be NaN, so undefined
+  Value p1 = v1.toPrimitive(exec,NumberType);
+  Value p2 = v2.toPrimitive(exec,NumberType);
+
+  if (p1.type() == StringType && p2.type() == StringType)
+    return p1.toString(exec) < p2.toString(exec) ? 1 : 0;
+
+  double n1 = p1.toNumber(exec);
+  double n2 = p2.toNumber(exec);
+  if ( isNaN( n1 ) || isNaN( n2 ) )
+    return -1; // means undefined
+  if (n1 == n2)
+    return 0;
+  /* TODO: +0, -0 */
+  if ( isPosInf( n1 ) )
+    return 0;
+  if ( isPosInf( n2 ) )
+    return 1;
+  if ( isNegInf( n2 ) )
+    return 0;
+  if ( isNegInf( n1 ) )
+    return 1;
+  return (n1 < n2) ? 1 : 0;
 }
 
-int maxInt(int d1, int d2)
+int KJS::maxInt(int d1, int d2)
 {
-    return (d1 > d2) ? d1 : d2;
+  return (d1 > d2) ? d1 : d2;
 }
 
-int minInt(int d1, int d2)
+int KJS::minInt(int d1, int d2)
 {
-    return (d1 < d2) ? d1 : d2;
+  return (d1 < d2) ? d1 : d2;
 }
 
 // ECMA 11.6
-JSValue *add(ExecState *exec, JSValue *v1, JSValue *v2, char oper)
+Value KJS::add(ExecState *exec, const Value &v1, const Value &v2, char oper)
 {
-    // exception for the Date exception in defaultValue()
-    JSType preferred = oper == '+' ? UnspecifiedType : NumberType;
-    JSValue *p1 = v1->toPrimitive(exec, preferred);
-    JSValue *p2 = v2->toPrimitive(exec, preferred);
-    
-    if ((p1->isString() || p2->isString()) && oper == '+')
-        return jsString(p1->toString(exec) + p2->toString(exec));
-    
-    if (oper == '+')
-        return jsNumber(p1->toNumber(exec) + p2->toNumber(exec));
-    else
-        return jsNumber(p1->toNumber(exec) - p2->toNumber(exec));
+  // exception for the Date exception in defaultValue()
+  Type preferred = oper == '+' ? UnspecifiedType : NumberType;
+  Value p1 = v1.toPrimitive(exec, preferred);
+  Value p2 = v2.toPrimitive(exec, preferred);
+
+  if ((p1.type() == StringType || p2.type() == StringType) && oper == '+') {
+    UString s1 = p1.toString(exec);
+    UString s2 = p2.toString(exec);
+
+    return String(s1 + s2);
+  }
+
+  double n1 = p1.toNumber(exec);
+  double n2 = p2.toNumber(exec);
+
+  if (oper == '+')
+    return Number(n1 + n2);
+  else
+    return Number(n1 - n2);
 }
 
 // ECMA 11.5
-JSValue *mult(ExecState *exec, JSValue *v1, JSValue *v2, char oper)
+Value KJS::mult(ExecState *exec, const Value &v1, const Value &v2, char oper)
 {
-    double n1 = v1->toNumber(exec);
-    double n2 = v2->toNumber(exec);
-    
-    double result;
-    
-    if (oper == '*')
-        result = n1 * n2;
-    else if (oper == '/')
-        result = n1 / n2;
-    else
-        result = fmod(n1, n2);
-    
-    return jsNumber(result);
-}
+  double n1 = v1.toNumber(exec);
+  double n2 = v2.toNumber(exec);
 
+  double result;
+
+  if (oper == '*')
+    result = n1 * n2;
+  else if (oper == '/')
+    result = n1 / n2;
+  else
+    result = fmod(n1, n2);
+
+  return Number(result);
 }

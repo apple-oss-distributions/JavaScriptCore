@@ -15,7 +15,7 @@
  *
  *  You should have received a copy of the GNU Lesser General Public
  *  License along with this library; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+ *  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  */
 
@@ -26,13 +26,13 @@
 
 #include "config.h"
 
-#if HAVE(PCREPOSIX)
+#ifdef HAVE_PCREPOSIX
 #include <pcre.h>
 #else  // POSIX regex - not so good...
 extern "C" { // bug with some libc5 distributions
 #include <regex.h>
 }
-#endif // HAVE(PCREPOSIX)
+#endif //HAVE_PCREPOSIX
 
 #include "ustring.h"
 
@@ -45,32 +45,24 @@ namespace KJS {
     RegExp(const UString &pattern, int flags = None);
     ~RegExp();
 
-    int flags() const { return m_flags; }
-    bool isValid() const { return !m_constructionError; }
-    const char* errorMessage() const { return m_constructionError; }
+    int flags() const { return _flags; }
 
     UString match(const UString &s, int i, int *pos = 0, int **ovector = 0);
-    unsigned subPatterns() const { return m_numSubPatterns; }
+    uint subPatterns() const { return _numSubPatterns; }
 
   private:
-#if HAVE(PCREPOSIX)
-    pcre *m_regex;
+#ifdef HAVE_PCREPOSIX
+    pcre *_regex;
 #else
-    regex_t m_regex;
+    regex_t _regex;
 #endif
-    int m_flags;
-    char* m_constructionError;
-    unsigned m_numSubPatterns;
+    int _flags;
+    uint _numSubPatterns;
 
     RegExp(const RegExp &);
     RegExp &operator=(const RegExp &);
-
-    static bool isHexDigit(UChar);
-    static unsigned char convertHex(int);
-    static unsigned char convertHex(int, int);
-    static UChar convertUnicode(UChar, UChar, UChar, UChar);
   };
 
-} // namespace
+}; // namespace
 
 #endif

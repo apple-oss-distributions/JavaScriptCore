@@ -1,7 +1,7 @@
 // -*- c-basic-offset: 2 -*-
 /*
  *  This file is part of the KDE libraries
- *  Copyright (C) 1999-2001,2004 Harri Porten (porten@kde.org)
+ *  Copyright (C) 1999-2001 Harri Porten (porten@kde.org)
  *
  *  This library is free software; you can redistribute it and/or
  *  modify it under the terms of the GNU Lesser General Public
@@ -15,30 +15,165 @@
  *
  *  You should have received a copy of the GNU Lesser General Public
  *  License along with this library; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+ *  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  */
 
-#include "config.h"
 #include "regexp.h"
 
-#include "lexer.h"
-
-#include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-namespace KJS {
+using KJS::CString;
+using KJS::RegExp;
+using KJS::UString;
+
+#ifdef HAVE_PCREPOSIX
+
+static CString convertToUTF8(const UString &s)
+{
+    // Allocate a buffer big enough to hold all the characters.
+    const int length = s.size();
+    const unsigned bufferSize = length * 3 + 1;
+    char fixedSizeBuffer[1024];
+    char *buffer;
+    if (bufferSize > sizeof(fixedSizeBuffer)) {
+        buffer = new char [bufferSize];
+    } else {
+        buffer = fixedSizeBuffer;
+    }
+
+    // Convert to runs of 8-bit characters.
+    char *p = buffer;
+    for (int i = 0; i != length; ++i) {
+        unsigned short c = s[i].unicode();
+        if (c < 0x80) {
+            *p++ = (char)c;
+        } else if (c < 0x800) {
+            *p++ = (char)((c >> 6) | 0xC0); // C0 is the 2-byte flag for UTF-8
+            *p++ = (char)((c | 0x80) & 0xBF); // next 6 bits, with high bit set
+        } else {
+            *p++ = (char)((c >> 12) | 0xE0); // E0 is the 3-byte flag for UTF-8
+            *p++ = (char)(((c >> 6) | 0x80) & 0xBF); // next 6 bits, with high bit set
+            *p++ = (char)((c | 0x80) & 0xBF); // next 6 bits, with high bit set
+        }
+    }
+    *p = 0;
+
+    // Return the result as a C string.
+    CString result(buffer);
+    if (buffer != fixedSizeBuffer) {
+        delete [] buffer;
+    }
+    return result;
+}
+
+struct StringOffset {
+    int offset;
+    int locationInOffsetsArray;
+};
+
+static int compareStringOffsets(const void *a, const void *b)
+{
+    const StringOffset *oa = static_cast<const StringOffset *>(a);
+    const StringOffset *ob = static_cast<const StringOffset *>(b);
+    
+    if (oa->offset < ob->offset) {
+        return -1;
+    }
+    if (oa->offset > ob->offset) {
+        return +1;
+    }
+    return 0;
+}
+
+const int sortedOffsetsFixedBufferSize = 128;
+
+static StringOffset *createSortedOffsetsArray(const int offsets[], int numOffsets,
+    StringOffset sortedOffsetsFixedBuffer[sortedOffsetsFixedBufferSize])
+{
+    // Allocate the sorted offsets.
+    StringOffset *sortedOffsets;
+    if (numOffsets <= sortedOffsetsFixedBufferSize) {
+        sortedOffsets = sortedOffsetsFixedBuffer;
+    } else {
+        sortedOffsets = new StringOffset [numOffsets];
+    }
+
+    // Copy offsets.
+    for (int i = 0; i != numOffsets; ++i) {
+        sortedOffsets[i].offset = offsets[i];
+        sortedOffsets[i].locationInOffsetsArray = i;
+    }
+
+    // Sort them.
+    qsort(sortedOffsets, numOffsets, sizeof(StringOffset), compareStringOffsets);
+
+    return sortedOffsets;
+}
+
+static void convertCharacterOffsetsToUTF8ByteOffsets(const char *s, int *offsets, int numOffsets)
+{
+    // Allocate buffer.
+    StringOffset fixedBuffer[sortedOffsetsFixedBufferSize];
+    StringOffset *sortedOffsets = createSortedOffsetsArray(offsets, numOffsets, fixedBuffer);
+
+    // Walk through sorted offsets and string, adjusting all the offests.
+    // Offsets that are off the ends of the string map to the edges of the string.
+    int characterOffset = 0;
+    const char *p = s;
+    for (int oi = 0; oi != numOffsets; ++oi) {
+        const int nextOffset = sortedOffsets[oi].offset;
+        while (*p && characterOffset < nextOffset) {
+            // Skip to the next character.
+            ++characterOffset;
+            do ++p; while ((*p & 0xC0) == 0x80); // if 1 of the 2 high bits is set, it's not the start of a character
+        }
+        offsets[sortedOffsets[oi].locationInOffsetsArray] = p - s;
+    }
+
+    // Free buffer.
+    if (sortedOffsets != fixedBuffer) {
+        delete [] sortedOffsets;
+    }
+}
+
+static void convertUTF8ByteOffsetsToCharacterOffsets(const char *s, int *offsets, int numOffsets)
+{
+    // Allocate buffer.
+    StringOffset fixedBuffer[sortedOffsetsFixedBufferSize];
+    StringOffset *sortedOffsets = createSortedOffsetsArray(offsets, numOffsets, fixedBuffer);
+
+    // Walk through sorted offsets and string, adjusting all the offests.
+    // Offsets that are off the end of the string map to the edges of the string.
+    int characterOffset = 0;
+    const char *p = s;
+    for (int oi = 0; oi != numOffsets; ++oi) {
+        const int nextOffset = sortedOffsets[oi].offset;
+        while (*p && (p - s) < nextOffset) {
+            // Skip to the next character.
+            ++characterOffset;
+            do ++p; while ((*p & 0xC0) == 0x80); // if 1 of the 2 high bits is set, it's not the start of a character
+        }
+        offsets[sortedOffsets[oi].locationInOffsetsArray] = characterOffset;
+    }
+
+    // Free buffer.
+    if (sortedOffsets != fixedBuffer) {
+        delete [] sortedOffsets;
+    }
+}
+
+#endif // HAVE_PCREPOSIX
 
 RegExp::RegExp(const UString &p, int flags)
-  : m_flags(flags), m_constructionError(0), m_numSubPatterns(0)
+  : _flags(flags), _numSubPatterns(0)
 {
-#if HAVE(PCREPOSIX)
+#ifdef HAVE_PCREPOSIX
 
   int options = PCRE_UTF8;
   // Note: the Global flag is already handled by RegExpProtoFunc::execute.
-  // FIXME: That last comment is dubious. Not all RegExps get run through RegExpProtoFunc::execute.
   if (flags & IgnoreCase)
     options |= PCRE_CASELESS;
   if (flags & Multiline)
@@ -46,20 +181,20 @@ RegExp::RegExp(const UString &p, int flags)
 
   const char *errorMessage;
   int errorOffset;
-  
-  m_regex = pcre_compile(reinterpret_cast<const uint16_t*>(p.data()), p.size(),
-                        options, &errorMessage, &errorOffset, NULL);
-  if (!m_regex) {
-    m_constructionError = strdup(errorMessage);
+  _regex = pcre_compile(convertToUTF8(p).c_str(), options, &errorMessage, &errorOffset, NULL);
+  if (!_regex) {
+#ifndef NDEBUG
+    fprintf(stderr, "KJS: pcre_compile() failed with '%s'\n", errorMessage);
+#endif
     return;
   }
 
 #ifdef PCRE_INFO_CAPTURECOUNT
   // Get number of subpatterns that will be returned.
-  pcre_fullinfo(m_regex, NULL, PCRE_INFO_CAPTURECOUNT, &m_numSubPatterns);
+  pcre_fullinfo(_regex, NULL, PCRE_INFO_CAPTURECOUNT, &_numSubPatterns);
 #endif
 
-#else /* HAVE(PCREPOSIX) */
+#else /* HAVE_PCREPOSIX */
 
   int regflags = 0;
 #ifdef REG_EXTENDED
@@ -75,27 +210,20 @@ RegExp::RegExp(const UString &p, int flags)
   //    ;
   // Note: the Global flag is already handled by RegExpProtoFunc::execute
 
-  // FIXME: support \u Unicode escapes.
-
-  int errorCode = regcomp(&m_regex, intern.ascii(), regflags);
-  if (errorCode != 0) {
-    char errorMessage[80];
-    regerror(errorCode, &m_regex, errorMessage, sizeof errorMessage);
-    m_constructionError = strdup(errorMessage);
-  }
+  regcomp(&_regex, p.ascii(), regflags);
+  /* TODO check for errors */
 
 #endif
 }
 
 RegExp::~RegExp()
 {
-#if HAVE(PCREPOSIX)
-  pcre_free(m_regex);
+#ifdef HAVE_PCREPOSIX
+  pcre_free(_regex);
 #else
   /* TODO: is this really okay after an error ? */
-  regfree(&m_regex);
+  regfree(&_regex);
 #endif
-  free(m_constructionError);
 }
 
 UString RegExp::match(const UString &s, int i, int *pos, int **ovector)
@@ -112,9 +240,9 @@ UString RegExp::match(const UString &s, int i, int *pos, int **ovector)
   if (i > s.size() || s.isNull())
     return UString::null();
 
-#if HAVE(PCREPOSIX)
+#ifdef HAVE_PCREPOSIX
 
-  if (!m_regex)
+  if (!_regex)
     return UString::null();
 
   // Set up the offset vector for the result.
@@ -126,11 +254,13 @@ UString RegExp::match(const UString &s, int i, int *pos, int **ovector)
     offsetVectorSize = 3;
     offsetVector = fixedSizeOffsetVector;
   } else {
-    offsetVectorSize = (m_numSubPatterns + 1) * 3;
+    offsetVectorSize = (_numSubPatterns + 1) * 3;
     offsetVector = new int [offsetVectorSize];
   }
 
-  const int numMatches = pcre_exec(m_regex, NULL, reinterpret_cast<const uint16_t *>(s.data()), s.size(), i, 0, offsetVector, offsetVectorSize);
+  const CString buffer(convertToUTF8(s));
+  convertCharacterOffsetsToUTF8ByteOffsets(buffer.c_str(), &i, 1);
+  const int numMatches = pcre_exec(_regex, NULL, buffer.c_str(), buffer.size(), i, 0, offsetVector, offsetVectorSize);
 
   if (numMatches < 0) {
 #ifndef NDEBUG
@@ -142,6 +272,8 @@ UString RegExp::match(const UString &s, int i, int *pos, int **ovector)
     return UString::null();
   }
 
+  convertUTF8ByteOffsetsToCharacterOffsets(buffer.c_str(), offsetVector, (numMatches == 0 ? 1 : numMatches) * 2);
+
   *pos = offsetVector[0];
   if (ovector)
     *ovector = offsetVector;
@@ -149,11 +281,11 @@ UString RegExp::match(const UString &s, int i, int *pos, int **ovector)
 
 #else
 
-  const unsigned maxMatch = 10;
+  const uint maxMatch = 10;
   regmatch_t rmatch[maxMatch];
 
   char *str = strdup(s.ascii()); // TODO: why ???
-  if (regexec(&m_regex, str + i, maxMatch, rmatch, 0)) {
+  if (regexec(&_regex, str + i, maxMatch, rmatch, 0)) {
     free(str);
     return UString::null();
   }
@@ -165,12 +297,12 @@ UString RegExp::match(const UString &s, int i, int *pos, int **ovector)
   }
 
   // map rmatch array to ovector used in PCRE case
-  m_numSubPatterns = 0;
-  for(unsigned j = 1; j < maxMatch && rmatch[j].rm_so >= 0 ; j++)
-      m_numSubPatterns++;
-  int ovecsize = (m_numSubPatterns+1)*3; // see above
+  _numSubPatterns = 0;
+  for(uint j = 1; j < maxMatch && rmatch[j].rm_so >= 0 ; j++)
+      _numSubPatterns++;
+  int ovecsize = (_numSubPatterns+1)*3; // see above
   *ovector = new int[ovecsize];
-  for (unsigned j = 0; j < m_numSubPatterns + 1; j++) {
+  for (uint j = 0; j < _numSubPatterns + 1; j++) {
     if (j>maxMatch)
       break;
     (*ovector)[2*j] = rmatch[j].rm_so + i;
@@ -182,37 +314,3 @@ UString RegExp::match(const UString &s, int i, int *pos, int **ovector)
 
 #endif
 }
-
-bool RegExp::isHexDigit(UChar uc)
-{
-  int c = uc.unicode();
-  return (c >= '0' && c <= '9' ||
-          c >= 'a' && c <= 'f' ||
-          c >= 'A' && c <= 'F');
-}
-
-unsigned char RegExp::convertHex(int c)
-{
-  if (c >= '0' && c <= '9')
-    return static_cast<unsigned char>(c - '0');
-  if (c >= 'a' && c <= 'f')
-    return static_cast<unsigned char>(c - 'a' + 10);
-  return static_cast<unsigned char>(c - 'A' + 10);
-}
-
-unsigned char RegExp::convertHex(int c1, int c2)
-{
-  return ((convertHex(c1) << 4) + convertHex(c2));
-}
-
-UChar RegExp::convertUnicode(UChar uc1, UChar uc2, UChar uc3, UChar uc4)
-{
-  int c1 = uc1.unicode();
-  int c2 = uc2.unicode();
-  int c3 = uc3.unicode();
-  int c4 = uc4.unicode();
-  return UChar((convertHex(c1) << 4) + convertHex(c2),
-               (convertHex(c3) << 4) + convertHex(c4));
-}
-
-} // namespace KJS

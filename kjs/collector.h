@@ -17,17 +17,14 @@
  *
  *  You should have received a copy of the GNU Lesser General Public
  *  License along with this library; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+ *  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  */
 
-#ifndef KJSCOLLECTOR_H_
-#define KJSCOLLECTOR_H_
+#ifndef _KJSCOLLECTOR_H_
+#define _KJSCOLLECTOR_H_
 
-#include "value.h"
-#include <wtf/HashCountedSet.h>
-
-#define KJS_MEM_LIMIT 210000
+#define KJS_MEM_LIMIT 500000
 
 namespace KJS {
 
@@ -38,11 +35,24 @@ namespace KJS {
     // disallow direct construction/destruction
     Collector();
   public:
+    /**
+     * Register an object with the collector. The following assumptions are
+     * made:
+     * @li the operator new() of the object class is overloaded.
+     * @li operator delete() has been overloaded as well and does not free
+     * the memory on its own.
+     *
+     * @param s Size of the memory to be registered.
+     * @return A pointer to the allocated memory.
+     */
     static void* allocate(size_t s);
+    /**
+     * Run the garbage collection. This involves calling the delete operator
+     * on each object and freeing the used memory.
+     */
     static bool collect();
-
-    static size_t size();
-    static bool isOutOfMemory() { return memoryFull; }
+    static int size();
+    static bool outOfMemory() { return memoryFull; }
 
 #ifdef KJS_DEBUG_MEM
     /**
@@ -51,24 +61,13 @@ namespace KJS {
     static void finalCheck();
 #endif
 
-    static void protect(JSValue *);
-    static void unprotect(JSValue *);
-
-    static size_t numInterpreters();
-    static size_t numProtectedObjects();
-    static HashCountedSet<const char*>* rootObjectTypeCounts();
-
-    class Thread;
-    static void registerThread();
-
+#if APPLE_CHANGES
+    static int numInterpreters();
+    static int numGCNotAllowedObjects();
+    static int numReferencedObjects();
+    static const void *rootObjectClasses(); // actually returns CFSetRef
+#endif
   private:
-
-    static void markProtectedObjects();
-    static void markCurrentThreadConservatively();
-    static void markOtherThreadConservatively(Thread *thread);
-    static void markStackObjectsConservatively();
-    static void markStackObjectsConservatively(void *start, void *end);
-
     static bool memoryFull;
   };
 

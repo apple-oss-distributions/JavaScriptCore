@@ -16,79 +16,99 @@
  *
  *  You should have received a copy of the GNU Lesser General Public
  *  License along with this library; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+ *  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  */
 
-#include "config.h"
-#include "bool_object.h"
-
+#include "value.h"
+#include "object.h"
+#include "types.h"
+#include "interpreter.h"
 #include "operations.h"
+#include "bool_object.h"
 #include "error_object.h"
+
+#include <assert.h>
 
 using namespace KJS;
 
-// ------------------------------ BooleanInstance ---------------------------
+// ------------------------------ BooleanInstanceImp ---------------------------
 
-const ClassInfo BooleanInstance::info = {"Boolean", 0, 0, 0};
+const ClassInfo BooleanInstanceImp::info = {"Boolean", 0, 0, 0};
 
-BooleanInstance::BooleanInstance(JSObject *proto)
-  : JSObject(proto)
+BooleanInstanceImp::BooleanInstanceImp(ObjectImp *proto)
+  : ObjectImp(proto)
 {
 }
 
-// ------------------------------ BooleanPrototype --------------------------
+// ------------------------------ BooleanPrototypeImp --------------------------
 
 // ECMA 15.6.4
 
-BooleanPrototype::BooleanPrototype(ExecState* exec, ObjectPrototype* objectProto, FunctionPrototype* funcProto)
-  : BooleanInstance(objectProto)
+BooleanPrototypeImp::BooleanPrototypeImp(ExecState *exec,
+                                         ObjectPrototypeImp *objectProto,
+                                         FunctionPrototypeImp *funcProto)
+  : BooleanInstanceImp(objectProto)
 {
-  // The constructor will be added later by Interpreter::Interpreter()
+  Value protect(this);
+  // The constructor will be added later by InterpreterImp::InterpreterImp()
 
-  putDirectFunction(new BooleanProtoFunc(exec, funcProto, BooleanProtoFunc::ToString, 0, toStringPropertyName), DontEnum);
-  putDirectFunction(new BooleanProtoFunc(exec, funcProto, BooleanProtoFunc::ValueOf, 0, valueOfPropertyName),  DontEnum);
-  setInternalValue(jsBoolean(false));
+  putDirect(toStringPropertyName, new BooleanProtoFuncImp(exec,funcProto,BooleanProtoFuncImp::ToString,0), DontEnum);
+  putDirect(valueOfPropertyName,  new BooleanProtoFuncImp(exec,funcProto,BooleanProtoFuncImp::ValueOf,0),  DontEnum);
+  setInternalValue(Boolean(false));
 }
 
 
-// ------------------------------ BooleanProtoFunc --------------------------
+// ------------------------------ BooleanProtoFuncImp --------------------------
 
-BooleanProtoFunc::BooleanProtoFunc(ExecState*, FunctionPrototype* funcProto, int i, int len, const Identifier& name)
-  : InternalFunctionImp(funcProto, name)
-  , id(i)
+BooleanProtoFuncImp::BooleanProtoFuncImp(ExecState *exec,
+                                         FunctionPrototypeImp *funcProto, int i, int len)
+  : InternalFunctionImp(funcProto), id(i)
 {
+  Value protect(this);
   putDirect(lengthPropertyName, len, DontDelete|ReadOnly|DontEnum);
 }
 
 
+bool BooleanProtoFuncImp::implementsCall() const
+{
+  return true;
+}
+
+
 // ECMA 15.6.4.2 + 15.6.4.3
-JSValue *BooleanProtoFunc::callAsFunction(ExecState *exec, JSObject *thisObj, const List &/*args*/)
+Value BooleanProtoFuncImp::call(ExecState *exec, Object &thisObj, const List &/*args*/)
 {
   // no generic function. "this" has to be a Boolean object
-  if (!thisObj->inherits(&BooleanInstance::info))
-    return throwError(exec, TypeError);
+  if (!thisObj.inherits(&BooleanInstanceImp::info)) {
+    Object err = Error::create(exec,TypeError);
+    exec->setException(err);
+    return err;
+  }
 
   // execute "toString()" or "valueOf()", respectively
 
-  JSValue *v = thisObj->internalValue();
-  assert(v);
+  Value v = thisObj.internalValue();
+  assert(!v.isNull());
 
   if (id == ToString)
-    return jsString(v->toString(exec));
-  return jsBoolean(v->toBoolean(exec)); /* TODO: optimize for bool case */
+    return String(v.toString(exec));
+  else
+    return Boolean(v.toBoolean(exec)); /* TODO: optimize for bool case */
 }
 
 // ------------------------------ BooleanObjectImp -----------------------------
 
 
-BooleanObjectImp::BooleanObjectImp(ExecState*, FunctionPrototype* funcProto, BooleanPrototype* booleanProto)
+BooleanObjectImp::BooleanObjectImp(ExecState *exec, FunctionPrototypeImp *funcProto,
+                                   BooleanPrototypeImp *booleanProto)
   : InternalFunctionImp(funcProto)
 {
+  Value protect(this);
   putDirect(prototypePropertyName, booleanProto, DontEnum|DontDelete|ReadOnly);
 
   // no. of arguments for constructor
-  putDirect(lengthPropertyName, jsNumber(1), ReadOnly|DontDelete|DontEnum);
+  putDirect(lengthPropertyName, NumberImp::one(), ReadOnly|DontDelete|DontEnum);
 }
 
 
@@ -98,27 +118,32 @@ bool BooleanObjectImp::implementsConstruct() const
 }
 
 // ECMA 15.6.2
-JSObject *BooleanObjectImp::construct(ExecState *exec, const List &args)
+Object BooleanObjectImp::construct(ExecState *exec, const List &args)
 {
-  JSObject *obj(new BooleanInstance(exec->lexicalInterpreter()->builtinBooleanPrototype()));
+  Object obj(new BooleanInstanceImp(exec->interpreter()->builtinBooleanPrototype().imp()));
 
-  bool b;
+  Boolean b;
   if (args.size() > 0)
-    b = args.begin()->toBoolean(exec);
+    b = args.begin()->dispatchToBoolean(exec);
   else
-    b = false;
+    b = Boolean(false);
 
-  obj->setInternalValue(jsBoolean(b));
+  obj.setInternalValue(b);
 
   return obj;
 }
 
+bool BooleanObjectImp::implementsCall() const
+{
+  return true;
+}
+
 // ECMA 15.6.1
-JSValue *BooleanObjectImp::callAsFunction(ExecState *exec, JSObject */*thisObj*/, const List &args)
+Value BooleanObjectImp::call(ExecState *exec, Object &/*thisObj*/, const List &args)
 {
   if (args.isEmpty())
-    return jsBoolean(false);
+    return Boolean(false);
   else
-    return jsBoolean(args[0]->toBoolean(exec)); /* TODO: optimize for bool case */
+    return Boolean(args[0].toBoolean(exec)); /* TODO: optimize for bool case */
 }
 

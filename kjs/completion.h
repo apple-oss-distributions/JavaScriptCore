@@ -17,8 +17,8 @@
  *
  *  You should have received a copy of the GNU Library General Public License
  *  along with this library; see the file COPYING.LIB.  If not, write to
- *  the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- *  Boston, MA 02110-1301, USA.
+ *  the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ *  Boston, MA 02111-1307, USA.
  *
  */
 
@@ -33,30 +33,31 @@ namespace KJS {
   /**
    * Completion types.
    */
-  enum ComplType { Normal, Break, Continue, ReturnValue, Throw, Interrupted };
+  enum ComplType { Normal, Break, Continue, ReturnValue, Throw };
 
   /**
    * Completion objects are used to convey the return status and value
    * from functions.
    *
-   * See FunctionImp::execute()
+   * See @ref FunctionImp::execute()
    *
    * @see FunctionImp
    *
    * @short Handle for a Completion type.
    */
-  class Completion {
+  class Completion : private Value {
   public:
-    Completion(ComplType c = Normal, JSValue *v = NULL, const Identifier &t = Identifier::null())
+    Completion(ComplType c = Normal, const Value& v = Value(),
+               const Identifier &t = Identifier::null())
         : comp(c), val(v), tar(t) { }
 
     ComplType complType() const { return comp; }
-    JSValue *value() const { return val; }
+    Value value() const { return val; }
     Identifier target() const { return tar; }
-    bool isValueCompletion() const { return val; }
+    bool isValueCompletion() const { return !val.isNull(); }
   private:
     ComplType comp;
-    JSValue *val;
+    Value val;
     Identifier tar;
   };
 

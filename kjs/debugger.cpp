@@ -16,15 +16,17 @@
  *
  *  You should have received a copy of the GNU Lesser General Public
  *  License along with this library; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+ *  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  */
 
-#include "config.h"
 #include "debugger.h"
-#include "ustring.h"
-
+#include "value.h"
+#include "object.h"
+#include "types.h"
+#include "interpreter.h"
 #include "internal.h"
+#include "ustring.h"
 
 using namespace KJS;
 
@@ -34,15 +36,12 @@ namespace KJS {
   struct AttachedInterpreter
   {
   public:
-    AttachedInterpreter(Interpreter *i, AttachedInterpreter *ai) : interp(i), next(ai) { ++Debugger::debuggersPresent; }
-    ~AttachedInterpreter() { --Debugger::debuggersPresent; }
+    AttachedInterpreter(Interpreter *i) : interp(i) {}
     Interpreter *interp;
     AttachedInterpreter *next;
   };
 
 }
-
-int Debugger::debuggersPresent = 0;
 
 Debugger::Debugger()
 {
@@ -51,39 +50,53 @@ Debugger::Debugger()
 
 Debugger::~Debugger()
 {
-  detach(0);
+  // detach from all interpreters
+  while (rep->interps)
+    detach(rep->interps->interp);
+
   delete rep;
 }
 
-void Debugger::attach(Interpreter* interp)
+void Debugger::attach(Interpreter *interp)
 {
-  Debugger *other = interp->debugger();
-  if (other == this)
-    return;
-  if (other)
-    other->detach(interp);
-  interp->setDebugger(this);
-  rep->interps = new AttachedInterpreter(interp, rep->interps);
-}
+  if (interp->imp()->debugger() != this)
+    interp->imp()->setDebugger(this);
 
-void Debugger::detach(Interpreter* interp)
-{
-  // iterate the addresses where AttachedInterpreter pointers are stored
-  // so we can unlink items from the list
-  AttachedInterpreter **p = &rep->interps;
-  AttachedInterpreter *q;
-  while ((q = *p)) {
-    if (!interp || q->interp == interp) {
-      *p = q->next;
-      q->interp->setDebugger(0);
-      delete q;
-    } else
-      p = &q->next;
+  // add to the list of attached interpreters
+  if (!rep->interps)
+    rep->interps = new AttachedInterpreter(interp);
+  else {
+    AttachedInterpreter *ai = rep->interps;
+    while (ai->next)
+      ai = ai->next;
+    ai->next = new AttachedInterpreter(interp);;
   }
 }
 
-bool Debugger::sourceParsed(ExecState */*exec*/, int /*sourceId*/, const UString &/*sourceURL*/, 
-                           const UString &/*source*/, int /*startingLineNumber*/, int /*errorLine*/, const UString & /*errorMsg*/)
+void Debugger::detach(Interpreter *interp)
+{
+  if (interp->imp()->debugger() == this)
+    interp->imp()->setDebugger(this);
+
+  // remove from the list of attached interpreters
+  if (rep->interps->interp == interp) {
+    AttachedInterpreter *old = rep->interps;
+    rep->interps = rep->interps->next;
+    delete old;
+  }
+
+  AttachedInterpreter *ai = rep->interps;
+  while (ai->next && ai->next->interp != interp)
+    ai = ai->next;
+  if (ai->next) {
+    AttachedInterpreter *old = ai->next;
+    ai->next = ai->next->next;
+    delete old;
+  }
+}
+
+bool Debugger::sourceParsed(ExecState */*exec*/, int /*sourceId*/,
+                            const UString &/*source*/, int /*errorLine*/)
 {
   return true;
 }
@@ -94,7 +107,7 @@ bool Debugger::sourceUnused(ExecState */*exec*/, int /*sourceId*/)
 }
 
 bool Debugger::exception(ExecState */*exec*/, int /*sourceId*/, int /*lineno*/,
-                         JSObject */*exceptionObj*/)
+                         Object &/*exceptionObj*/)
 {
   return true;
 }
@@ -106,13 +119,13 @@ bool Debugger::atStatement(ExecState */*exec*/, int /*sourceId*/, int /*firstLin
 }
 
 bool Debugger::callEvent(ExecState */*exec*/, int /*sourceId*/, int /*lineno*/,
-                         JSObject */*function*/, const List &/*args*/)
+                         Object &/*function*/, const List &/*args*/)
 {
   return true;
 }
 
 bool Debugger::returnEvent(ExecState */*exec*/, int /*sourceId*/, int /*lineno*/,
-                           JSObject */*function*/)
+                           Object &/*function*/)
 {
   return true;
 }

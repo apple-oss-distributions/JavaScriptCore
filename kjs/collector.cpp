@@ -1,7 +1,7 @@
-// -*- mode: c++; c-basic-offset: 4 -*-
+// -*- c-basic-offset: 2 -*-
 /*
  *  This file is part of the KDE libraries
- *  Copyright (C) 2003, 2004, 2005, 2006 Apple Computer, Inc.
+ *  Copyright (C) 2003 Apple Computer, Inc.
  *
  *  This library is free software; you can redistribute it and/or
  *  modify it under the terms of the GNU Lesser General Public
@@ -15,66 +15,39 @@
  *
  *  You should have received a copy of the GNU Lesser General Public
  *  License along with this library; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+ *  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  */
 
-#include "config.h"
 #include "collector.h"
 
-#include <wtf/FastMalloc.h>
-#include <wtf/FastMallocInternal.h>
-#include <wtf/HashCountedSet.h>
-#include "internal.h"
-#include "list.h"
 #include "value.h"
-#include "JSLockC.h"
+#include "internal.h"
 
-#include <setjmp.h>
-#include <algorithm>
-
-#if PLATFORM(DARWIN)
-
-#include <pthread.h>
-#include <mach/mach.h>
-#include <mach/mach_port.h>
-#include <mach/task.h>
-#include <mach/thread_act.h>
-#include <mach/mach_vm.h>
-
-#elif PLATFORM(WIN_OS)
-
-#include <windows.h>
-
-#elif PLATFORM(UNIX)
-
-#include <pthread.h>
-
-#if HAVE(PTHREAD_NP_H)
-#include <pthread_np.h>
+#if APPLE_CHANGES
+#include <CoreFoundation/CoreFoundation.h>
+#include <cxxabi.h>
 #endif
 
-#endif
-
-#define DEBUG_COLLECTOR 0
-
-using std::max;
+#include <collector.h>
+#include <value.h>
+#include <internal.h>
 
 namespace KJS {
 
 // tunable parameters
-const size_t MINIMUM_CELL_SIZE = 56;
-const size_t BLOCK_SIZE = (8 * 4096);
-const size_t SPARE_EMPTY_BLOCKS = 2;
-const size_t MIN_ARRAY_SIZE = 14;
-const size_t GROWTH_FACTOR = 2;
-const size_t LOW_WATER_FACTOR = 4;
-const size_t ALLOCATIONS_PER_COLLECTION = 1000;
+const int MINIMUM_CELL_SIZE = 56;
+const int BLOCK_SIZE = (8 * 4096);
+const int SPARE_EMPTY_BLOCKS = 2;
+const int MIN_ARRAY_SIZE = 14;
+const int GROWTH_FACTOR = 2;
+const int LOW_WATER_FACTOR = 4;
+const int ALLOCATIONS_PER_COLLECTION = 1000;
 
 // derived constants
-const size_t CELL_ARRAY_LENGTH = (MINIMUM_CELL_SIZE / sizeof(double)) + (MINIMUM_CELL_SIZE % sizeof(double) != 0 ? sizeof(double) : 0);
-const size_t CELL_SIZE = CELL_ARRAY_LENGTH * sizeof(double);
-const size_t CELLS_PER_BLOCK = ((BLOCK_SIZE * 8 - sizeof(uint32_t) * 8 - sizeof(void *) * 8) / (CELL_SIZE * 8));
+const int CELL_ARRAY_LENGTH = (MINIMUM_CELL_SIZE / sizeof(double)) + (MINIMUM_CELL_SIZE % sizeof(double) != 0 ? sizeof(double) : 0);
+const int CELL_SIZE = CELL_ARRAY_LENGTH * sizeof(double);
+const int CELLS_PER_BLOCK = ((BLOCK_SIZE * 8 - sizeof(int32_t) * 8 - sizeof(void *) * 8) / (CELL_SIZE * 8));
 
 
 
@@ -83,7 +56,7 @@ struct CollectorCell {
     double memory[CELL_ARRAY_LENGTH];
     struct {
       void *zeroIfFree;
-      ptrdiff_t next;
+      CollectorCell *next;
     } freeCell;
   } u;
 };
@@ -91,22 +64,22 @@ struct CollectorCell {
 
 struct CollectorBlock {
   CollectorCell cells[CELLS_PER_BLOCK];
-  uint32_t usedCells;
+  int32_t usedCells;
   CollectorCell *freeList;
 };
 
 struct CollectorHeap {
   CollectorBlock **blocks;
-  size_t numBlocks;
-  size_t usedBlocks;
-  size_t firstBlockWithPossibleSpace;
+  int numBlocks;
+  int usedBlocks;
+  int firstBlockWithPossibleSpace;
   
   CollectorCell **oversizeCells;
-  size_t numOversizeCells;
-  size_t usedOversizeCells;
+  int numOversizeCells;
+  int usedOversizeCells;
 
-  size_t numLiveObjects;
-  size_t numLiveObjectsAtLastCollect;
+  int numLiveObjects;
+  int numAllocationsSinceLastCollect;
 };
 
 static CollectorHeap heap = {NULL, 0, 0, 0, NULL, 0, 0, 0, 0};
@@ -115,489 +88,230 @@ bool Collector::memoryFull = false;
 
 void* Collector::allocate(size_t s)
 {
-  assert(JSLock::lockCount() > 0);
-
+  if (s == 0)
+    return 0L;
+  
   // collect if needed
-  size_t numLiveObjects = heap.numLiveObjects;
-  if (numLiveObjects - heap.numLiveObjectsAtLastCollect >= ALLOCATIONS_PER_COLLECTION) {
+  if (++heap.numAllocationsSinceLastCollect >= ALLOCATIONS_PER_COLLECTION) {
     collect();
-    numLiveObjects = heap.numLiveObjects;
   }
   
-  if (s > CELL_SIZE) {
+  if (s > (unsigned)CELL_SIZE) {
     // oversize allocator
-
-    size_t usedOversizeCells = heap.usedOversizeCells;
-    size_t numOversizeCells = heap.numOversizeCells;
-
-    if (usedOversizeCells == numOversizeCells) {
-      numOversizeCells = max(MIN_ARRAY_SIZE, numOversizeCells * GROWTH_FACTOR);
-      heap.numOversizeCells = numOversizeCells;
-      heap.oversizeCells = static_cast<CollectorCell **>(fastRealloc(heap.oversizeCells, numOversizeCells * sizeof(CollectorCell *)));
+    if (heap.usedOversizeCells == heap.numOversizeCells) {
+      heap.numOversizeCells = MAX(MIN_ARRAY_SIZE, heap.numOversizeCells * GROWTH_FACTOR);
+      heap.oversizeCells = (CollectorCell **)realloc(heap.oversizeCells, heap.numOversizeCells * sizeof(CollectorCell *));
     }
     
-    void *newCell = fastMalloc(s);
-    heap.oversizeCells[usedOversizeCells] = static_cast<CollectorCell *>(newCell);
-    heap.usedOversizeCells = usedOversizeCells + 1;
-    heap.numLiveObjects = numLiveObjects + 1;
+    void *newCell = malloc(s);
+    heap.oversizeCells[heap.usedOversizeCells] = (CollectorCell *)newCell;
+    heap.usedOversizeCells++;
+    heap.numLiveObjects++;
 
+    ((ValueImp *)(newCell))->_flags = 0;
     return newCell;
   }
   
   // slab allocator
   
-  size_t usedBlocks = heap.usedBlocks;
-
-  size_t i = heap.firstBlockWithPossibleSpace;
-  CollectorBlock *targetBlock;
-  size_t targetBlockUsedCells;
-  if (i != usedBlocks) {
-    targetBlock = heap.blocks[i];
-    targetBlockUsedCells = targetBlock->usedCells;
-    assert(targetBlockUsedCells <= CELLS_PER_BLOCK);
-    while (targetBlockUsedCells == CELLS_PER_BLOCK) {
-      if (++i == usedBlocks)
-        goto allocateNewBlock;
+  CollectorBlock *targetBlock = NULL;
+  
+  int i;
+  for (i = heap.firstBlockWithPossibleSpace; i < heap.usedBlocks; i++) {
+    if (heap.blocks[i]->usedCells < CELLS_PER_BLOCK) {
       targetBlock = heap.blocks[i];
-      targetBlockUsedCells = targetBlock->usedCells;
-      assert(targetBlockUsedCells <= CELLS_PER_BLOCK);
+      break;
     }
-    heap.firstBlockWithPossibleSpace = i;
-  } else {
-allocateNewBlock:
-    // didn't find one, need to allocate a new block
-    size_t numBlocks = heap.numBlocks;
-    if (usedBlocks == numBlocks) {
-      numBlocks = max(MIN_ARRAY_SIZE, numBlocks * GROWTH_FACTOR);
-      heap.numBlocks = numBlocks;
-      heap.blocks = static_cast<CollectorBlock **>(fastRealloc(heap.blocks, numBlocks * sizeof(CollectorBlock *)));
-    }
+  }
 
-    targetBlock = static_cast<CollectorBlock *>(fastCalloc(1, sizeof(CollectorBlock)));
+  heap.firstBlockWithPossibleSpace = i;
+  
+  if (targetBlock == NULL) {
+    // didn't find one, need to allocate a new block
+    
+    if (heap.usedBlocks == heap.numBlocks) {
+      heap.numBlocks = MAX(MIN_ARRAY_SIZE, heap.numBlocks * GROWTH_FACTOR);
+      heap.blocks = (CollectorBlock **)realloc(heap.blocks, heap.numBlocks * sizeof(CollectorBlock *));
+    }
+    
+    targetBlock = (CollectorBlock *)calloc(1, sizeof(CollectorBlock));
     targetBlock->freeList = targetBlock->cells;
-    targetBlockUsedCells = 0;
-    heap.blocks[usedBlocks] = targetBlock;
-    heap.usedBlocks = usedBlocks + 1;
-    heap.firstBlockWithPossibleSpace = usedBlocks;
+    heap.blocks[heap.usedBlocks] = targetBlock;
+    heap.usedBlocks++;
   }
   
   // find a free spot in the block and detach it from the free list
   CollectorCell *newCell = targetBlock->freeList;
-  
-  // "next" field is a byte offset -- 0 means next cell, so a zeroed block is already initialized
-  // could avoid the casts by using a cell offset, but this avoids a relatively-slow multiply
-  targetBlock->freeList = reinterpret_cast<CollectorCell *>(reinterpret_cast<char *>(newCell + 1) + newCell->u.freeCell.next);
 
-  targetBlock->usedCells = targetBlockUsedCells + 1;
-  heap.numLiveObjects = numLiveObjects + 1;
-
-  return newCell;
-}
-
-#if USE(MULTIPLE_THREADS)
-
-struct Collector::Thread {
-  Thread(pthread_t pthread, mach_port_t mthread) : posixThread(pthread), machThread(mthread) {}
-  Thread *next;
-  pthread_t posixThread;
-  mach_port_t machThread;
-};
-
-pthread_key_t registeredThreadKey;
-pthread_once_t registeredThreadKeyOnce = PTHREAD_ONCE_INIT;
-Collector::Thread *registeredThreads;
-  
-static void destroyRegisteredThread(void *data) 
-{
-  Collector::Thread *thread = (Collector::Thread *)data;
-
-  if (registeredThreads == thread) {
-    registeredThreads = registeredThreads->next;
+  if (newCell->u.freeCell.next != NULL) {
+    targetBlock->freeList = newCell->u.freeCell.next;
+  } else if (targetBlock->usedCells == (CELLS_PER_BLOCK - 1)) {
+    // last cell in this block
+    targetBlock->freeList = NULL;
   } else {
-    Collector::Thread *last = registeredThreads;
-    for (Collector::Thread *t = registeredThreads->next; t != NULL; t = t->next) {
-      if (t == thread) {
-        last->next = t->next;
-          break;
-      }
-      last = t;
-    }
+    // all next pointers are initially 0, meaning "next cell"
+    targetBlock->freeList = newCell + 1;
   }
 
-  delete thread;
-}
+  targetBlock->usedCells++;
+  heap.numLiveObjects++;
 
-static void initializeRegisteredThreadKey()
-{
-  pthread_key_create(&registeredThreadKey, destroyRegisteredThread);
-}
-
-void Collector::registerThread()
-{
-  pthread_once(&registeredThreadKeyOnce, initializeRegisteredThreadKey);
-
-  if (!pthread_getspecific(registeredThreadKey)) {
-    pthread_t pthread = pthread_self();
-    WTF::fastMallocRegisterThread(pthread);
-    Collector::Thread *thread = new Collector::Thread(pthread, pthread_mach_thread_np(pthread));
-    thread->next = registeredThreads;
-    registeredThreads = thread;
-    pthread_setspecific(registeredThreadKey, thread);
-  }
-}
-
-#endif
-
-#define IS_POINTER_ALIGNED(p) (((intptr_t)(p) & (sizeof(char *) - 1)) == 0)
-
-// cells are 8-byte aligned
-#define IS_CELL_ALIGNED(p) (((intptr_t)(p) & 7) == 0)
-
-void Collector::markStackObjectsConservatively(void *start, void *end)
-{
-  if (start > end) {
-    void *tmp = start;
-    start = end;
-    end = tmp;
-  }
-
-  assert(((char *)end - (char *)start) < 0x1000000);
-  assert(IS_POINTER_ALIGNED(start));
-  assert(IS_POINTER_ALIGNED(end));
-  
-  char **p = (char **)start;
-  char **e = (char **)end;
-  
-  size_t usedBlocks = heap.usedBlocks;
-  CollectorBlock **blocks = heap.blocks;
-  size_t usedOversizeCells = heap.usedOversizeCells;
-  CollectorCell **oversizeCells = heap.oversizeCells;
-
-  const size_t lastCellOffset = sizeof(CollectorCell) * (CELLS_PER_BLOCK - 1);
-
-  while (p != e) {
-    char *x = *p++;
-    if (IS_CELL_ALIGNED(x) && x) {
-      for (size_t block = 0; block < usedBlocks; block++) {
-        size_t offset = x - reinterpret_cast<char *>(blocks[block]);
-        if (offset <= lastCellOffset && offset % sizeof(CollectorCell) == 0)
-          goto gotGoodPointer;
-      }
-      for (size_t i = 0; i != usedOversizeCells; i++)
-        if (x == reinterpret_cast<char *>(oversizeCells[i]))
-          goto gotGoodPointer;
-      continue;
-
-gotGoodPointer:
-      if (((CollectorCell *)x)->u.freeCell.zeroIfFree != 0) {
-        JSCell *imp = reinterpret_cast<JSCell *>(x);
-        if (!imp->marked())
-          imp->mark();
-      }
-    }
-  }
-}
-
-void Collector::markCurrentThreadConservatively()
-{
-    jmp_buf registers;
-    setjmp(registers);
-
-#if PLATFORM(DARWIN)
-    pthread_t thread = pthread_self();    
-    void *stackBase = pthread_get_stackaddr_np(thread);
-#elif PLATFORM(WIN_OS) && PLATFORM(X86) && COMPILER(MSVC)
-    NT_TIB *pTib;
-    __asm {
-        MOV EAX, FS:[18h]
-        MOV pTib, EAX
-    }
-    void *stackBase = (void *)pTib->StackBase;
-#elif PLATFORM(UNIX)
-    static void *stackBase = 0;
-    static pthread_t stackThread;
-    pthread_t thread = pthread_self();
-    if (stackBase == 0 || thread != stackThread) {
-        pthread_attr_t sattr;
-#if HAVE(PTHREAD_NP_H)
-        // e.g. on FreeBSD 5.4, neundorf@kde.org
-        pthread_attr_get_np(thread, &sattr);
-#else
-        // FIXME: this function is non-portable; other POSIX systems may have different np alternatives
-        pthread_getattr_np(thread, &sattr);
-#endif
-        // Should work but fails on Linux (?)
-        //  pthread_attr_getstack(&sattr, &stackBase, &stackSize);
-        pthread_attr_getstackaddr(&sattr, &stackBase);
-        assert(stackBase);
-        stackThread = thread;
-    }
-#else
-#error Need a way to get the stack base on this platform
-#endif
-
-    void *dummy;
-    void *stackPointer = &dummy;
-    markStackObjectsConservatively(stackPointer, stackBase);
-}
-
-#if USE(MULTIPLE_THREADS)
-
-typedef unsigned long usword_t; // word size, assumed to be either 32 or 64 bit
-
-void Collector::markOtherThreadConservatively(Thread *thread)
-{
-  thread_suspend(thread->machThread);
-
-#if PLATFORM(X86)
-  i386_thread_state_t regs;
-  unsigned user_count = sizeof(regs)/sizeof(int);
-  thread_state_flavor_t flavor = i386_THREAD_STATE;
-#elif PLATFORM(X86_64)
-  x86_thread_state64_t  regs;
-  unsigned user_count = x86_THREAD_STATE64_COUNT;
-  thread_state_flavor_t flavor = x86_THREAD_STATE64;
-#elif PLATFORM(PPC)
-  ppc_thread_state_t  regs;
-  unsigned user_count = PPC_THREAD_STATE_COUNT;
-  thread_state_flavor_t flavor = PPC_THREAD_STATE;
-#elif PLATFORM(PPC64)
-  ppc_thread_state64_t  regs;
-  unsigned user_count = PPC_THREAD_STATE64_COUNT;
-  thread_state_flavor_t flavor = PPC_THREAD_STATE64;
-#elif defined(__arm__)
-   arm_thread_state_t regs;
-   unsigned user_count = ARM_THREAD_STATE_COUNT;
-   thread_state_flavor_t flavor = ARM_THREAD_STATE;
-#else
-#error Unknown Architecture
-#endif
-  // get the thread register state
-  thread_get_state(thread->machThread, flavor, (thread_state_t)&regs, &user_count);
-  
-  // scan the registers
-  markStackObjectsConservatively((void *)&regs, (void *)((char *)&regs + (user_count * sizeof(usword_t))));
-   
-  // scan the stack
-#if PLATFORM(X86) && __DARWIN_UNIX03
-  markStackObjectsConservatively((void *)regs.__esp, pthread_get_stackaddr_np(thread->posixThread));
-#elif PLATFORM(X86)
-  markStackObjectsConservatively((void *)regs.esp, pthread_get_stackaddr_np(thread->posixThread));
-#elif PLATFORM(X86_64) && __DARWIN_UNIX03
-  markStackObjectsConservatively((void *)regs.__rsp, pthread_get_stackaddr_np(thread->posixThread));
-#elif PLATFORM(X86_64)
-  markStackObjectsConservatively((void *)regs.rsp, pthread_get_stackaddr_np(thread->posixThread));
-#elif (PLATFORM(PPC) || PLATFORM(PPC64)) && __DARWIN_UNIX03
-  markStackObjectsConservatively((void *)regs.__r1, pthread_get_stackaddr_np(thread->posixThread));
-#elif PLATFORM(PPC) || PLATFORM(PPC64)
-  markStackObjectsConservatively((void *)regs.r1, pthread_get_stackaddr_np(thread->posixThread));
-#elif defined(__arm__)
-  markStackObjectsConservatively((void *)regs.__sp, pthread_get_stackaddr_np(thread->posixThread)); 
-#else
-#error Unknown Architecture
-#endif
-
-  thread_resume(thread->machThread);
-}
-
-#endif
-
-void Collector::markStackObjectsConservatively()
-{
-  markCurrentThreadConservatively();
-
-#if USE(MULTIPLE_THREADS)
-  for (Thread *thread = registeredThreads; thread != NULL; thread = thread->next) {
-    if (thread->posixThread != pthread_self()) {
-      markOtherThreadConservatively(thread);
-    }
-  }
-#endif
-}
-
-typedef HashCountedSet<JSCell *> ProtectCounts;
-
-static ProtectCounts& protectedValues()
-{
-    static ProtectCounts pv;
-    return pv;
-}
-
-void Collector::protect(JSValue *k)
-{
-    assert(k);
-    assert(JSLock::lockCount() > 0);
-
-    if (JSImmediate::isImmediate(k))
-      return;
-
-    protectedValues().add(k->downcast());
-}
-
-void Collector::unprotect(JSValue *k)
-{
-    assert(k);
-    assert(JSLock::lockCount() > 0);
-
-    if (JSImmediate::isImmediate(k))
-      return;
-
-    protectedValues().remove(k->downcast());
-}
-
-void Collector::markProtectedObjects()
-{
-  ProtectCounts& pv = protectedValues();
-  ProtectCounts::iterator end = pv.end();
-  for (ProtectCounts::iterator it = pv.begin(); it != end; ++it) {
-    JSCell *val = it->first;
-    if (!val->marked())
-      val->mark();
-  }
+  ((ValueImp *)(newCell))->_flags = 0;
+  return (void *)(newCell);
 }
 
 bool Collector::collect()
 {
-  assert(JSLock::lockCount() > 0);
+  bool deleted = false;
 
-    pthread_t javaScriptCollectionThread = JSJavaScriptCollectionThread();
-    bool currentThreadIsMainThread = (javaScriptCollectionThread == 0 || javaScriptCollectionThread == pthread_self());
-
-  if (Interpreter::s_hook) {
-    Interpreter* scr = Interpreter::s_hook;
+  // MARK: first mark all referenced objects recursively
+  // starting out from the set of root objects
+  if (InterpreterImp::s_hook) {
+    InterpreterImp *scr = InterpreterImp::s_hook;
     do {
-      scr->mark(currentThreadIsMainThread);
+      //fprintf( stderr, "Collector marking interpreter %p\n",(void*)scr);
+      scr->mark();
       scr = scr->next;
-    } while (scr != Interpreter::s_hook);
+    } while (scr != InterpreterImp::s_hook);
   }
+  
+  // mark any other objects that we wouldn't delete anyway
+  for (int block = 0; block < heap.usedBlocks; block++) {
 
-  // MARK: first mark all referenced objects recursively starting out from the set of root objects
+    int minimumCellsToProcess = heap.blocks[block]->usedCells;
+    CollectorBlock *curBlock = heap.blocks[block];
 
-  markStackObjectsConservatively();
-  markProtectedObjects();
-  List::markProtectedLists();
+    for (int cell = 0; cell < CELLS_PER_BLOCK; cell++) {
+      if (minimumCellsToProcess < cell) {
+	goto skip_block_mark;
+      }
+	
+      ValueImp *imp = (ValueImp *)(curBlock->cells + cell);
+
+      if (((CollectorCell *)imp)->u.freeCell.zeroIfFree != 0) {
+	
+	if ((imp->_flags & (ValueImp::VI_CREATED|ValueImp::VI_MARKED)) == ValueImp::VI_CREATED &&
+	    ((imp->_flags & ValueImp::VI_GCALLOWED) == 0 || imp->refcount != 0)) {
+	  imp->mark();
+	}
+      } else {
+	minimumCellsToProcess++;
+      }
+    }
+  skip_block_mark: ;
+  }
+  
+  for (int cell = 0; cell < heap.usedOversizeCells; cell++) {
+    ValueImp *imp = (ValueImp *)heap.oversizeCells[cell];
+    if ((imp->_flags & (ValueImp::VI_CREATED|ValueImp::VI_MARKED)) == ValueImp::VI_CREATED &&
+	((imp->_flags & ValueImp::VI_GCALLOWED) == 0 || imp->refcount != 0)) {
+      imp->mark();
+    }
+  }
 
   // SWEEP: delete everything with a zero refcount (garbage) and unmark everything else
   
-  size_t emptyBlocks = 0;
-  size_t numLiveObjects = heap.numLiveObjects;
+  int emptyBlocks = 0;
 
-  for (size_t block = 0; block < heap.usedBlocks; block++) {
+  for (int block = 0; block < heap.usedBlocks; block++) {
     CollectorBlock *curBlock = heap.blocks[block];
 
-    size_t usedCells = curBlock->usedCells;
-    CollectorCell *freeList = curBlock->freeList;
+    int minimumCellsToProcess = curBlock->usedCells;
 
-    if (usedCells == CELLS_PER_BLOCK) {
-      // special case with a block where all cells are used -- testing indicates this happens often
-      for (size_t i = 0; i < CELLS_PER_BLOCK; i++) {
-        CollectorCell *cell = curBlock->cells + i;
-        JSCell *imp = reinterpret_cast<JSCell *>(cell);
-        if (imp->m_marked) {
-          imp->m_marked = false;
-        } else if (currentThreadIsMainThread || imp->m_destructorIsThreadSafe) {
-            // special case for allocated but uninitialized object
-            // (We don't need this check earlier because nothing prior this point assumes the object has a valid vptr.)
-            if (cell->u.freeCell.zeroIfFree == 0)
-                continue;
-            imp->~JSCell();
-          --usedCells;
-          --numLiveObjects;
-
-          // put cell on the free list
-          cell->u.freeCell.zeroIfFree = 0;
-          cell->u.freeCell.next = reinterpret_cast<char *>(freeList) - reinterpret_cast<char *>(cell + 1);
-          freeList = cell;
-        }
+    for (int cell = 0; cell < CELLS_PER_BLOCK; cell++) {
+      if (minimumCellsToProcess < cell) {
+	goto skip_block_sweep;
       }
-    } else {
-      size_t minimumCellsToProcess = usedCells;
-      for (size_t i = 0; (i < minimumCellsToProcess) & (i < CELLS_PER_BLOCK); i++) {
-        CollectorCell *cell = curBlock->cells + i;
-        if (cell->u.freeCell.zeroIfFree == 0) {
-          ++minimumCellsToProcess;
-        } else {
-          JSCell *imp = reinterpret_cast<JSCell *>(cell);
-          if (imp->m_marked) {
-            imp->m_marked = false;
-          } else if (currentThreadIsMainThread || imp->m_destructorIsThreadSafe) {
-            imp->~JSCell();
-            --usedCells;
-            --numLiveObjects;
 
-            // put cell on the free list
-            cell->u.freeCell.zeroIfFree = 0;
-            cell->u.freeCell.next = reinterpret_cast<char *>(freeList) - reinterpret_cast<char *>(cell + 1);
-            freeList = cell;
-          }
-        }
+      ValueImp *imp = (ValueImp *)(curBlock->cells + cell);
+
+      if (((CollectorCell *)imp)->u.freeCell.zeroIfFree != 0) {
+	if (!imp->refcount && imp->_flags == (ValueImp::VI_GCALLOWED | ValueImp::VI_CREATED)) {
+	  //fprintf( stderr, "Collector::deleting ValueImp %p (%s)\n", (void*)imp, typeid(*imp).name());
+	  // emulate destructing part of 'operator delete()'
+	  imp->~ValueImp();
+	  curBlock->usedCells--;
+	  heap.numLiveObjects--;
+	  deleted = true;
+
+	  // put it on the free list
+	  ((CollectorCell *)imp)->u.freeCell.zeroIfFree = 0;
+	  ((CollectorCell *)imp)->u.freeCell.next = curBlock->freeList;
+	  curBlock->freeList = (CollectorCell *)imp;
+
+	} else {
+	  imp->_flags &= ~ValueImp::VI_MARKED;
+	}
+      } else {
+	minimumCellsToProcess++;
       }
     }
-    
-    curBlock->usedCells = usedCells;
-    curBlock->freeList = freeList;
 
-    if (usedCells == 0) {
+  skip_block_sweep:
+
+    if (heap.blocks[block]->usedCells == 0) {
       emptyBlocks++;
       if (emptyBlocks > SPARE_EMPTY_BLOCKS) {
 #if !DEBUG_COLLECTOR
-        fastFree(curBlock);
+	free(heap.blocks[block]);
 #endif
-        // swap with the last block so we compact as we go
-        heap.blocks[block] = heap.blocks[heap.usedBlocks - 1];
-        heap.usedBlocks--;
-        block--; // Don't move forward a step in this case
+	// swap with the last block so we compact as we go
+	heap.blocks[block] = heap.blocks[heap.usedBlocks - 1];
+	heap.usedBlocks--;
+	block--; // Don't move forward a step in this case
 
-        if (heap.numBlocks > MIN_ARRAY_SIZE && heap.usedBlocks < heap.numBlocks / LOW_WATER_FACTOR) {
-          heap.numBlocks = heap.numBlocks / GROWTH_FACTOR; 
-          heap.blocks = (CollectorBlock **)fastRealloc(heap.blocks, heap.numBlocks * sizeof(CollectorBlock *));
-        }
-      }
+	if (heap.numBlocks > MIN_ARRAY_SIZE && heap.usedBlocks < heap.numBlocks / LOW_WATER_FACTOR) {
+	  heap.numBlocks = heap.numBlocks / GROWTH_FACTOR; 
+	  heap.blocks = (CollectorBlock **)realloc(heap.blocks, heap.numBlocks * sizeof(CollectorBlock *));
+	}
+      } 
     }
   }
 
-  if (heap.numLiveObjects != numLiveObjects)
+  if (deleted) {
     heap.firstBlockWithPossibleSpace = 0;
+  }
   
-  size_t cell = 0;
+  int cell = 0;
   while (cell < heap.usedOversizeCells) {
-    JSCell *imp = (JSCell *)heap.oversizeCells[cell];
+    ValueImp *imp = (ValueImp *)heap.oversizeCells[cell];
     
-    if (!imp->m_marked && (currentThreadIsMainThread || imp->m_destructorIsThreadSafe)) {
-      imp->~JSCell();
+    if (!imp->refcount && 
+	imp->_flags == (ValueImp::VI_GCALLOWED | ValueImp::VI_CREATED)) {
+      
+      imp->~ValueImp();
 #if DEBUG_COLLECTOR
       heap.oversizeCells[cell]->u.freeCell.zeroIfFree = 0;
 #else
-      fastFree(imp);
+      free((void *)imp);
 #endif
 
       // swap with the last oversize cell so we compact as we go
       heap.oversizeCells[cell] = heap.oversizeCells[heap.usedOversizeCells - 1];
 
       heap.usedOversizeCells--;
-      numLiveObjects--;
+      deleted = true;
+      heap.numLiveObjects--;
 
       if (heap.numOversizeCells > MIN_ARRAY_SIZE && heap.usedOversizeCells < heap.numOversizeCells / LOW_WATER_FACTOR) {
-        heap.numOversizeCells = heap.numOversizeCells / GROWTH_FACTOR; 
-        heap.oversizeCells = (CollectorCell **)fastRealloc(heap.oversizeCells, heap.numOversizeCells * sizeof(CollectorCell *));
+	heap.numOversizeCells = heap.numOversizeCells / GROWTH_FACTOR; 
+	heap.oversizeCells = (CollectorCell **)realloc(heap.oversizeCells, heap.numOversizeCells * sizeof(CollectorCell *));
       }
+
     } else {
-      imp->m_marked = false;
+      imp->_flags &= ~ValueImp::VI_MARKED;
       cell++;
     }
   }
   
-  bool deleted = heap.numLiveObjects != numLiveObjects;
-
-  heap.numLiveObjects = numLiveObjects;
-  heap.numLiveObjectsAtLastCollect = numLiveObjects;
+  heap.numAllocationsSinceLastCollect = 0;
   
-  memoryFull = (numLiveObjects >= KJS_MEM_LIMIT);
+  memoryFull = (heap.numLiveObjects >= KJS_MEM_LIMIT);
 
   return deleted;
 }
 
-size_t Collector::size() 
+int Collector::size() 
 {
   return heap.numLiveObjects; 
 }
@@ -608,67 +322,114 @@ void Collector::finalCheck()
 }
 #endif
 
-size_t Collector::numInterpreters()
+#if APPLE_CHANGES
+
+int Collector::numInterpreters()
 {
-  size_t count = 0;
-  if (Interpreter::s_hook) {
-    Interpreter* scr = Interpreter::s_hook;
+  int count = 0;
+  if (InterpreterImp::s_hook) {
+    InterpreterImp *scr = InterpreterImp::s_hook;
     do {
       ++count;
       scr = scr->next;
-    } while (scr != Interpreter::s_hook);
+    } while (scr != InterpreterImp::s_hook);
   }
   return count;
 }
 
-size_t Collector::numProtectedObjects()
+int Collector::numGCNotAllowedObjects()
 {
-  return protectedValues().size();
-}
+  int count = 0;
+  for (int block = 0; block < heap.usedBlocks; block++) {
+    CollectorBlock *curBlock = heap.blocks[block];
 
-static const char *typeName(JSCell *val)
-{
-  const char *name = "???";
-  switch (val->type()) {
-    case UnspecifiedType:
-      break;
-    case UndefinedType:
-      name = "undefined";
-      break;
-    case NullType:
-      name = "null";
-      break;
-    case BooleanType:
-      name = "boolean";
-      break;
-    case StringType:
-      name = "string";
-      break;
-    case NumberType:
-      name = "number";
-      break;
-    case ObjectType: {
-      const ClassInfo *info = static_cast<JSObject *>(val)->classInfo();
-      name = info ? info->className : "Object";
-      break;
+    for (int cell = 0; cell < CELLS_PER_BLOCK; cell++) {
+      ValueImp *imp = (ValueImp *)(curBlock->cells + cell);
+      
+      if (((CollectorCell *)imp)->u.freeCell.zeroIfFree != 0 &&
+	  (imp->_flags & ValueImp::VI_GCALLOWED) == 0) {
+	++count;
+      }
     }
-    case GetterSetterType:
-      name = "gettersetter";
-      break;
   }
-  return name;
+  
+  for (int cell = 0; cell < heap.usedOversizeCells; cell++) {
+    ValueImp *imp = (ValueImp *)heap.oversizeCells[cell];
+    if ((imp->_flags & ValueImp::VI_GCALLOWED) == 0) {
+      ++count;
+    }
+  }
+
+  return count;
 }
 
-HashCountedSet<const char*>* Collector::rootObjectTypeCounts()
+int Collector::numReferencedObjects()
 {
-    HashCountedSet<const char*>* counts = new HashCountedSet<const char*>;
+  int count = 0;
+  for (int block = 0; block < heap.usedBlocks; block++) {
+    CollectorBlock *curBlock = heap.blocks[block];
 
-    ProtectCounts& pv = protectedValues();
-    ProtectCounts::iterator end = pv.end();
-    for (ProtectCounts::iterator it = pv.begin(); it != end; ++it)
-        counts->add(typeName(it->first));
+    for (int cell = 0; cell < CELLS_PER_BLOCK; cell++) {
+      ValueImp *imp = (ValueImp *)(curBlock->cells + cell);
+      
+      if (((CollectorCell *)imp)->u.freeCell.zeroIfFree != 0 &&
+	  imp->refcount != 0) {
+	++count;
+      }
+    }
+  }
+  
+  for (int cell = 0; cell < heap.usedOversizeCells; cell++) {
+    ValueImp *imp = (ValueImp *)heap.oversizeCells[cell];
+      if (imp->refcount != 0) {
+        ++count;
+      }
+  }
 
-    return counts;
+  return count;
 }
+
+const void *Collector::rootObjectClasses()
+{
+  CFMutableSetRef classes = CFSetCreateMutable(NULL, 0, &kCFTypeSetCallBacks);
+  
+  for (int block = 0; block < heap.usedBlocks; block++) {
+    CollectorBlock *curBlock = heap.blocks[block];
+    for (int cell = 0; cell < CELLS_PER_BLOCK; cell++) {
+      ValueImp *imp = (ValueImp *)(curBlock->cells + cell);
+      
+      if (((CollectorCell *)imp)->u.freeCell.zeroIfFree != 0 &&
+	  ((imp->_flags & ValueImp::VI_GCALLOWED) == 0 || imp->refcount != 0)) {
+	const char *mangled_name = typeid(*imp).name();
+	int status;
+	char *demangled_name = __cxxabiv1::__cxa_demangle (mangled_name, NULL, NULL, &status);
+	
+	CFStringRef className = CFStringCreateWithCString(NULL, demangled_name, kCFStringEncodingASCII);
+	free(demangled_name);
+	CFSetAddValue(classes, className);
+	CFRelease(className);
+      }
+    }
+  }
+  
+  for (int cell = 0; cell < heap.usedOversizeCells; cell++) {
+    ValueImp *imp = (ValueImp *)heap.oversizeCells[cell];
+    
+    if ((imp->_flags & ValueImp::VI_GCALLOWED) == 0 || imp->refcount != 0) {
+      const char *mangled_name = typeid(*imp).name();
+      int status;
+      char *demangled_name = __cxxabiv1::__cxa_demangle (mangled_name, NULL, NULL, &status);
+      
+      CFStringRef className = CFStringCreateWithCString(NULL, demangled_name, kCFStringEncodingASCII);
+      free(demangled_name);
+      CFSetAddValue(classes, className);
+      CFRelease(className);
+    }
+  }
+  
+  return classes;
+}
+
+#endif // APPLE_CHANGES
 
 } // namespace KJS

@@ -16,7 +16,7 @@
  *
  *  You should have received a copy of the GNU Lesser General Public
  *  License along with this library; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+ *  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  */
 
@@ -27,19 +27,21 @@
 
 namespace KJS {
 
-  class ArrayInstance : public JSObject {
+  class ArrayInstanceImp : public ObjectImp {
   public:
-    ArrayInstance(JSObject *proto, unsigned initialLength);
-    ArrayInstance(JSObject *proto, const List &initialValues);
-    ~ArrayInstance();
+    ArrayInstanceImp(ObjectImp *proto, unsigned initialLength);
+    ArrayInstanceImp(ObjectImp *proto, const List &initialValues);
+    ~ArrayInstanceImp();
 
-    virtual bool getOwnPropertySlot(ExecState *, const Identifier&, PropertySlot&);
-    virtual bool getOwnPropertySlot(ExecState *, unsigned, PropertySlot&);
-    virtual void put(ExecState *exec, const Identifier &propertyName, JSValue *value, int attr = None);
-    virtual void put(ExecState *exec, unsigned propertyName, JSValue *value, int attr = None);
+    virtual Value get(ExecState *exec, const Identifier &propertyName) const;
+    virtual Value get(ExecState *exec, unsigned propertyName) const;
+    virtual void put(ExecState *exec, const Identifier &propertyName, const Value &value, int attr = None);
+    virtual void put(ExecState *exec, unsigned propertyName, const Value &value, int attr = None);
+    virtual bool hasProperty(ExecState *exec, const Identifier &propertyName) const;
+    virtual bool hasProperty(ExecState *exec, unsigned propertyName) const;
     virtual bool deleteProperty(ExecState *exec, const Identifier &propertyName);
     virtual bool deleteProperty(ExecState *exec, unsigned propertyName);
-    virtual void getPropertyNames(ExecState*, PropertyNameArray&);
+    virtual ReferenceList propList(ExecState *exec, bool recursive);
 
     virtual void mark();
 
@@ -49,11 +51,9 @@ namespace KJS {
     unsigned getLength() const { return length; }
     
     void sort(ExecState *exec);
-    void sort(ExecState *exec, JSObject *compareFunction);
+    void sort(ExecState *exec, Object &compareFunction);
     
   private:
-    static JSValue *lengthGetter(ExecState *, JSObject *, const Identifier&, const PropertySlot&);
-
     void setLength(unsigned newLength, ExecState *exec);
     
     unsigned pushUndefinedObjectsToEnd(ExecState *exec);
@@ -63,9 +63,9 @@ namespace KJS {
     unsigned length;
     unsigned storageLength;
     unsigned capacity;
-    JSValue **storage;
+    ValueImp **storage;
   };
 
-} // namespace KJS
+}; // namespace KJS
 
 #endif

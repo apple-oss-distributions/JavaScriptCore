@@ -15,22 +15,30 @@
  *
  *  You should have received a copy of the GNU Library General Public License
  *  along with this library; see the file COPYING.LIB.  If not, write to
- *  the Free Software Foundation, Inc., 51 Franklin Street, Fifth Floor,
- *  Boston, MA 02110-1301, USA.
+ *  the Free Software Foundation, Inc., 59 Temple Place - Suite 330,
+ *  Boston, MA 02111-1307, USA.
  *
  */
 
-#include "config.h"
-#include "lexer.h"
+#ifdef HAVE_CONFIG_H
+#include <config.h>
+#endif
 
 #include <ctype.h>
+#include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
+#include <assert.h>
 
+#include "value.h"
+#include "object.h"
+#include "types.h"
 #include "interpreter.h"
 #include "nodes.h"
-#include <wtf/unicode/Unicode.h>
-
-static bool isDecimalDigit(unsigned short c);
+#include "lexer.h"
+#include "identifier.h"
+#include "lookup.h"
+#include "internal.h"
 
 // we can't specify the namespace in yacc's C output, so do it here
 using namespace KJS;
@@ -41,10 +49,9 @@ static Lexer *currLexer = 0;
 #include "grammar.h"
 #endif
 
-#include "lookup.h"
 #include "lexer.lut.h"
 
-extern YYLTYPE kjsyylloc; // global bison variable holding token info
+extern YYLTYPE yylloc; // global bison variable holding token info
 
 // a bridge for yacc from the C world to C++
 int kjsyylex()
@@ -60,19 +67,17 @@ Lexer::Lexer()
 #ifndef KJS_PURE_ECMA
     bol(true),
 #endif
-    current(0), next1(0), next2(0), next3(0),
-    strings(0), numStrings(0), stringsCapacity(0),
-    identifiers(0), numIdentifiers(0), identifiersCapacity(0)
+    current(0), next1(0), next2(0), next3(0)
 {
   // allocate space for read buffers
   buffer8 = new char[size8];
-  buffer16 = new KJS::UChar[size16];
+  buffer16 = new UChar[size16];
   currLexer = this;
+
 }
 
 Lexer::~Lexer()
 {
-  doneParsing();
   delete [] buffer8;
   delete [] buffer16;
 }
@@ -94,10 +99,9 @@ void Lexer::globalClear()
 }
 #endif
 
-void Lexer::setCode(const UString &sourceURL, int startingLineNumber, const KJS::UChar *c, unsigned int len)
+void Lexer::setCode(const UChar *c, unsigned int len)
 {
-  yylineno = 1 + startingLineNumber;
-  m_sourceURL = sourceURL;
+  yylineno = 1;
   restrKeyword = false;
   delimited = false;
   eatNextIdentifier = false;
@@ -108,28 +112,25 @@ void Lexer::setCode(const UString &sourceURL, int startingLineNumber, const KJS:
   length = len;
   skipLF = false;
   skipCR = false;
-  error = false;
 #ifndef KJS_PURE_ECMA
   bol = true;
 #endif
 
   // read first characters
-  shift(4);
+  current = (length > 0) ? code[0].uc : 0;
+  next1 = (length > 1) ? code[1].uc : 0;
+  next2 = (length > 2) ? code[2].uc : 0;
+  next3 = (length > 3) ? code[3].uc : 0;
 }
 
 void Lexer::shift(unsigned int p)
 {
   while (p--) {
+    pos++;
     current = next1;
     next1 = next2;
     next2 = next3;
-    do {
-      if (pos >= length) {
-        next3 = -1;
-        break;
-      }
-      next3 = code[pos++].uc;
-    } while (WTF::Unicode::isFormatChar(next3));
+    next3 = (pos + 3 < length) ? code[pos+3].uc : 0;
   }
 }
 
@@ -188,7 +189,7 @@ int Lexer::lex()
       } else if (current == '/' && next1 == '*') {
         shift(1);
         state = InMultiLineComment;
-      } else if (current == -1) {
+      } else if (current == 0) {
         if (!terminator && !delimited) {
           // automatic semicolon insertion if program incomplete
           token = ';';
@@ -206,11 +207,9 @@ int Lexer::lex()
       } else if (current == '"' || current == '\'') {
         state = InString;
         stringType = current;
-      } else if (isIdentStart(current)) {
+      } else if (isIdentLetter(current)) {
         record16(current);
-        state = InIdentifierOrKeyword;
-      } else if (current == '\\') {
-        state = InIdentifierUnicodeEscapeStart;
+        state = InIdentifier;
       } else if (current == '0') {
         record8(current);
         state = InNum0;
@@ -245,7 +244,7 @@ int Lexer::lex()
       if (current == stringType) {
         shift(1);
         setDone(String);
-      } else if (isLineTerminator() || current == -1) {
+      } else if (current == 0 || isLineTerminator()) {
         setDone(Bad);
       } else if (current == '\\') {
         state = InEscapeSequence;
@@ -275,10 +274,7 @@ int Lexer::lex()
         state = InHexEscape;
       else if (current == 'u')
         state = InUnicodeEscape;
-      else if (isLineTerminator()) {
-        nextLine();
-        state = InString;
-      } else {
+      else {
         record16(singleEscape(current));
         state = InString;
       }
@@ -299,7 +295,8 @@ int Lexer::lex()
       }
       break;
     case InUnicodeEscape:
-      if (isHexDigit(current) && isHexDigit(next1) && isHexDigit(next2) && isHexDigit(next3)) {
+      if (isHexDigit(current) && isHexDigit(next1) &&
+          isHexDigit(next2) && isHexDigit(next3)) {
         record16(convertUnicode(current, next1, next2, next3));
         shift(3);
         state = InString;
@@ -320,12 +317,12 @@ int Lexer::lex()
           setDone(Other);
         } else
           state = Start;
-      } else if (current == -1) {
+      } else if (current == 0) {
         setDone(Eof);
       }
       break;
     case InMultiLineComment:
-      if (current == -1) {
+      if (current == 0) {
         setDone(Bad);
       } else if (isLineTerminator()) {
         nextLine();
@@ -334,14 +331,12 @@ int Lexer::lex()
         shift(1);
       }
       break;
-    case InIdentifierOrKeyword:
     case InIdentifier:
-      if (isIdentPart(current))
+      if (isIdentLetter(current) || isDecimalDigit(current)) {
         record16(current);
-      else if (current == '\\')
-        state = InIdentifierUnicodeEscapeStart;
-      else
-        setDone(state == InIdentifierOrKeyword ? IdentifierOrKeyword : Identifier);
+        break;
+      }
+      setDone(Identifier);
       break;
     case InNum0:
       if (current == 'x' || current == 'X') {
@@ -416,21 +411,6 @@ int Lexer::lex()
       } else
         setDone(Number);
       break;
-    case InIdentifierUnicodeEscapeStart:
-      if (current == 'u')
-        state = InIdentifierUnicodeEscape;
-      else
-        setDone(Bad);
-      break;
-    case InIdentifierUnicodeEscape:
-      if (isHexDigit(current) && isHexDigit(next1) && isHexDigit(next2) && isHexDigit(next3)) {
-        record16(convertUnicode(current, next1, next2, next3));
-        shift(3);
-        state = InIdentifier;
-      } else {
-        setDone(Bad);
-      }
-      break;
     default:
       assert(!"Unhandled state in switch statement");
     }
@@ -445,7 +425,8 @@ int Lexer::lex()
   }
 
   // no identifiers allowed directly after numeric literal, e.g. "3in" is bad
-  if ((state == Number || state == Octal || state == Hex) && isIdentStart(current))
+  if ((state == Number || state == Octal || state == Hex)
+      && isIdentLetter(current))
     state = Bad;
 
   // terminate string
@@ -461,18 +442,15 @@ int Lexer::lex()
   if (state == Number) {
     dval = strtod(buffer8, 0L);
   } else if (state == Hex) { // scan hex numbers
-    const char *p = buffer8 + 2;
-    while (char c = *p++) {
-      dval *= 16;
-      dval += convertHex(c);
-    }
+    // TODO: support long unsigned int
+    unsigned int i;
+    sscanf(buffer8, "%x", &i);
+    dval = i;
     state = Number;
   } else if (state == Octal) {   // scan octal number
-    const char *p = buffer8 + 1;
-    while (char c = *p++) {
-      dval *= 8;
-      dval += c - '0';
-    }
+    unsigned int ui;
+    sscanf(buffer8, "%o", &ui);
+    dval = ui;
     state = Number;
   }
 
@@ -503,8 +481,8 @@ int Lexer::lex()
 
   restrKeyword = false;
   delimited = false;
-  kjsyylloc.first_line = yylineno; // ???
-  kjsyylloc.last_line = yylineno;
+  yylloc.first_line = yylineno; // ???
+  yylloc.last_line = yylineno;
 
   switch (state) {
   case Eof:
@@ -515,17 +493,18 @@ int Lexer::lex()
       delimited = true;
     }
     break;
-  case IdentifierOrKeyword:
-    if ((token = Lookup::find(&mainTable, buffer16, pos16)) < 0) {
   case Identifier:
+    if ((token = Lookup::find(&mainTable, buffer16, pos16)) < 0) {
       // Lookup for keyword failed, means this is an identifier
       // Apply anonymous-function hack below (eat the identifier)
       if (eatNextIdentifier) {
         eatNextIdentifier = false;
+        UString debugstr(buffer16, pos16); fprintf(stderr,"Anonymous function hack: eating identifier %s\n",debugstr.ascii());
         token = lex();
         break;
       }
-      kjsyylval.ident = makeIdentifier(buffer16, pos16);
+      /* TODO: close leak on parse error. same holds true for String */
+      kjsyylval.ident = new KJS::Identifier(buffer16, pos16);
       token = IDENT;
       break;
     }
@@ -540,7 +519,7 @@ int Lexer::lex()
       restrKeyword = true;
     break;
   case String:
-    kjsyylval.ustr = makeUString(buffer16, pos16);
+    kjsyylval.ustr = new UString(buffer16, pos16);
     token = STRING;
     break;
   case Number:
@@ -548,14 +527,10 @@ int Lexer::lex()
     token = NUMBER;
     break;
   case Bad:
-#ifdef KJS_DEBUG_LEX
     fprintf(stderr, "yylex: ERROR.\n");
-#endif
-    error = true;
     return -1;
   default:
     assert(!"unhandled numeration value in switch");
-    error = true;
     return -1;
   }
   lastToken = token;
@@ -564,7 +539,8 @@ int Lexer::lex()
 
 bool Lexer::isWhiteSpace() const
 {
-  return current == '\t' || current == 0x0b || current == 0x0c || WTF::Unicode::isSeparatorSpace(current);
+  return (current == ' ' || current == '\t' ||
+          current == 0x0b || current == 0x0c);
 }
 
 bool Lexer::isLineTerminator()
@@ -575,39 +551,23 @@ bool Lexer::isLineTerminator()
       skipLF = true;
   else if (lf)
       skipCR = true;
-  return cr || lf || current == 0x2028 || current == 0x2029;
+  return cr || lf;
 }
 
-bool Lexer::isIdentStart(unsigned short c)
+bool Lexer::isIdentLetter(unsigned short c)
 {
-  return (WTF::Unicode::category(c) & (WTF::Unicode::Letter_Uppercase
-        | WTF::Unicode::Letter_Lowercase
-        | WTF::Unicode::Letter_Titlecase
-        | WTF::Unicode::Letter_Modifier
-        | WTF::Unicode::Letter_Other))
-    || c == '$' || c == '_';
+  /* TODO: allow other legitimate unicode chars */
+  return (c >= 'a' && c <= 'z' ||
+          c >= 'A' && c <= 'Z' ||
+          c == '$' || c == '_');
 }
 
-bool Lexer::isIdentPart(unsigned short c)
-{
-  return (WTF::Unicode::category(c) & (WTF::Unicode::Letter_Uppercase
-        | WTF::Unicode::Letter_Lowercase
-        | WTF::Unicode::Letter_Titlecase
-        | WTF::Unicode::Letter_Modifier
-        | WTF::Unicode::Letter_Other
-        | WTF::Unicode::Mark_NonSpacing
-        | WTF::Unicode::Mark_SpacingCombining
-        | WTF::Unicode::Number_DecimalDigit
-        | WTF::Unicode::Punctuation_Connector))
-    || c == '$' || c == '_';
-}
-
-static bool isDecimalDigit(unsigned short c)
+bool Lexer::isDecimalDigit(unsigned short c)
 {
   return (c >= '0' && c <= '9');
 }
 
-bool Lexer::isHexDigit(unsigned short c)
+bool Lexer::isHexDigit(unsigned short c) const
 {
   return (c >= '0' && c <= '9' ||
           c >= 'a' && c <= 'f' ||
@@ -781,10 +741,10 @@ unsigned char Lexer::convertHex(unsigned short c1, unsigned short c2)
   return ((convertHex(c1) << 4) + convertHex(c2));
 }
 
-KJS::UChar Lexer::convertUnicode(unsigned short c1, unsigned short c2,
+UChar Lexer::convertUnicode(unsigned short c1, unsigned short c2,
                                      unsigned short c3, unsigned short c4)
 {
-  return KJS::UChar((convertHex(c1) << 4) + convertHex(c2),
+  return UChar((convertHex(c1) << 4) + convertHex(c2),
                (convertHex(c3) << 4) + convertHex(c4));
 }
 
@@ -804,19 +764,12 @@ void Lexer::record8(unsigned short c)
   buffer8[pos8++] = (char) c;
 }
 
-void Lexer::record16(int c)
-{
-  ASSERT(c >= 0);
-  ASSERT(c <= USHRT_MAX);
-  record16(UChar(static_cast<unsigned short>(c)));
-}
-
-void Lexer::record16(KJS::UChar c)
+void Lexer::record16(UChar c)
 {
   // enlarge buffer if full
   if (pos16 >= size16 - 1) {
-    KJS::UChar *tmp = new KJS::UChar[2 * size16];
-    memcpy(tmp, buffer16, size16 * sizeof(KJS::UChar));
+    UChar *tmp = new UChar[2 * size16];
+    memcpy(tmp, buffer16, size16 * sizeof(UChar));
     delete [] buffer16;
     buffer16 = tmp;
     size16 *= 2;
@@ -832,7 +785,7 @@ bool Lexer::scanRegExp()
   bool inBrackets = false;
 
   while (1) {
-    if (isLineTerminator() || current == -1)
+    if (isLineTerminator() || current == 0)
       return false;
     else if (current != '/' || lastWasEscape == true || inBrackets == true)
     {
@@ -856,60 +809,11 @@ bool Lexer::scanRegExp()
     shift(1);
   }
 
-  while (isIdentPart(current)) {
+  while (isIdentLetter(current)) {
     record16(current);
     shift(1);
   }
   flags = UString(buffer16, pos16);
 
   return true;
-}
-
-
-void Lexer::doneParsing()
-{
-  for (unsigned i = 0; i < numIdentifiers; i++) {
-    delete identifiers[i];
-  }
-  fastFree(identifiers);
-  identifiers = 0;
-  numIdentifiers = 0;
-  identifiersCapacity = 0;
-
-  for (unsigned i = 0; i < numStrings; i++) {
-    delete strings[i];
-  }
-  fastFree(strings);
-  strings = 0;
-  numStrings = 0;
-  stringsCapacity = 0;
-}
-
-const int initialCapacity = 64;
-const int growthFactor = 2;
-
-// FIXME: this completely ignores its parameters, instead using buffer16 and pos16 - wtf?
-Identifier *Lexer::makeIdentifier(KJS::UChar*, unsigned int)
-{
-  if (numIdentifiers == identifiersCapacity) {
-    identifiersCapacity = (identifiersCapacity == 0) ? initialCapacity : identifiersCapacity *growthFactor;
-    identifiers = (KJS::Identifier **)fastRealloc(identifiers, sizeof(KJS::Identifier *) * identifiersCapacity);
-  }
-
-  KJS::Identifier *identifier = new KJS::Identifier(buffer16, pos16);
-  identifiers[numIdentifiers++] = identifier;
-  return identifier;
-}
- 
-// FIXME: this completely ignores its parameters, instead using buffer16 and pos16 - wtf?
-UString *Lexer::makeUString(KJS::UChar*, unsigned int)
-{
-  if (numStrings == stringsCapacity) {
-    stringsCapacity = (stringsCapacity == 0) ? initialCapacity : stringsCapacity *growthFactor;
-    strings = (UString **)fastRealloc(strings, sizeof(UString *) * stringsCapacity);
-  }
-
-  UString *string = new UString(buffer16, pos16);
-  strings[numStrings++] = string;
-  return string;
 }
