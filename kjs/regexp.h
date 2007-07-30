@@ -45,22 +45,30 @@ namespace KJS {
     RegExp(const UString &pattern, int flags = None);
     ~RegExp();
 
-    int flags() const { return _flags; }
+    int flags() const { return m_flags; }
+    bool isValid() const { return !m_constructionError; }
+    const char* errorMessage() const { return m_constructionError; }
 
     UString match(const UString &s, int i, int *pos = 0, int **ovector = 0);
-    unsigned subPatterns() const { return _numSubPatterns; }
+    unsigned subPatterns() const { return m_numSubPatterns; }
 
   private:
 #if HAVE(PCREPOSIX)
-    pcre *_regex;
+    pcre *m_regex;
 #else
-    regex_t _regex;
+    regex_t m_regex;
 #endif
-    int _flags;
-    unsigned _numSubPatterns;
+    int m_flags;
+    char* m_constructionError;
+    unsigned m_numSubPatterns;
 
     RegExp(const RegExp &);
     RegExp &operator=(const RegExp &);
+
+    static bool isHexDigit(UChar);
+    static unsigned char convertHex(int);
+    static unsigned char convertHex(int, int);
+    static UChar convertUnicode(UChar, UChar, UChar, UChar);
   };
 
 } // namespace

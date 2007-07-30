@@ -74,11 +74,25 @@ are simple data values; negative values are for special things like \d and so
 on. Zero means further processing is needed (for things like \x), or the escape
 is invalid. */
 
+#if JAVASCRIPT   /* This is the "JavaScript" table for ASCII systems */
+static const short int escapes[] = {
+     0,      0,      0,      0,      0,      0,      0,      0,   /* 0 - 7 */
+     0,      0,    ':',    ';',    '<',    '=',    '>',    '?',   /* 8 - ? */
+   '@',      0, -ESC_B,      0, -ESC_D,      0,      0,      0,   /* @ - G */
+     0,      0,      0,      0,      0,      0,      0,      0,   /* H - O */
+     0,      0,      0, -ESC_S,      0,      0,      0, -ESC_W,   /* P - W */
+     0,      0,      0,    '[',   '\\',    ']',    '^',    '_',   /* X - _ */
+   '`',      7, -ESC_b,      0, -ESC_d,      0,  ESC_f,      0,   /* ` - g */
+     0,      0,      0,      0,      0,      0,  ESC_n,      0,   /* h - o */
+     0,      0,  ESC_r, -ESC_s,  ESC_tee,    0,  ESC_v, -ESC_w,   /* p - w */
+     0,      0,      0                                            /* x - z */
+};
+#else
 #if !EBCDIC   /* This is the "normal" table for ASCII systems */
 static const short int escapes[] = {
      0,      0,      0,      0,      0,      0,      0,      0,   /* 0 - 7 */
      0,      0,    ':',    ';',    '<',    '=',    '>',    '?',   /* 8 - ? */
-   '@', -ESC_A, -ESC_B, -ESC_C, -ESC_D, -ESC_E,      0, -ESC_G,   /* @ - G */
+   '@',      0, -ESC_B, -ESC_C, -ESC_D, -ESC_E,      0, -ESC_G,   /* @ - G */
      0,      0,      0,      0,      0,      0,      0,      0,   /* H - O */
 -ESC_P, -ESC_Q,      0, -ESC_S,      0,      0,      0, -ESC_W,   /* P - W */
 -ESC_X,      0, -ESC_Z,    '[',   '\\',    ']',    '^',    '_',   /* X - _ */
@@ -87,7 +101,6 @@ static const short int escapes[] = {
 -ESC_p,      0,  ESC_r, -ESC_s,  ESC_tee,    0,      0, -ESC_w,   /* p - w */
      0,      0, -ESC_z                                            /* x - z */
 };
-
 #else         /* This is the "abnormal" table for EBCDIC systems */
 static const short int escapes[] = {
 /*  48 */     0,     0,      0,     '.',    '<',   '(',    '+',    '|',
@@ -114,6 +127,7 @@ static const short int escapes[] = {
 /*  F0 */     0,     0,      0,       0,      0,     0,      0,      0,
 /*  F8 */     0,     0,      0,       0,      0,     0,      0,      0
 };
+#endif
 #endif
 
 
@@ -408,6 +422,7 @@ else
     /* A number of Perl escapes are not handled by PCRE. We give an explicit
     error. */
 
+#if !JAVASCRIPT
     case 'l':
     case 'L':
     case 'N':
@@ -415,6 +430,7 @@ else
     case 'U':
     *errorcodeptr = ERR37;
     break;
+#endif
 
     /* The handling of escape sequences consisting of a string of digits
     starting with one that is not zero is not straightforward. By experiment,
@@ -516,6 +532,24 @@ else
       }
     break;
 
+#if JAVASCRIPT
+    case 'u':
+    c = 0;
+    while (i++ < 4 && (DIGITAB(ptr[1]) & ctype_xdigit) != 0)
+      {
+      int cc;                               /* Some compilers don't like ++ */
+      cc = *(++ptr);                        /* in initializers */
+#if !EBCDIC    /* ASCII coding */
+      if (cc >= 'a') cc -= 32;              /* Convert to upper case */
+      c = c * 16 + cc - ((cc < 'A')? '0' : ('A' - 10));
+#else          /* EBCDIC coding */
+      if (cc <= 'z') cc += 64;              /* Convert to upper case */
+      c = c * 16 + cc - ((cc >= '0')? '0' : ('A' - 10));
+#endif
+      }
+    break;
+#endif
+
     /* Other special escapes not starting with a digit are straightforward */
 
     case 'c':
@@ -562,6 +596,7 @@ return c;
 
 
 
+#if !JAVASCRIPT
 #ifdef SUPPORT_UCP
 /*************************************************
 *               Handle \P and \p                 *
@@ -652,6 +687,7 @@ ERROR_RETURN:
 *ptrptr = ptr;
 return -1;
 }
+#endif
 #endif
 
 
@@ -1018,6 +1054,8 @@ Arguments:
 Returns:      pointer to the opcode for the bracket, or NULL if not found
 */
 
+#if !JAVASCRIPT
+
 static const uschar *
 find_bracket(const uschar *code, BOOL utf8, int number)
 {
@@ -1075,6 +1113,8 @@ for (;;)
     }
   }
 }
+
+#endif
 
 
 
@@ -1312,6 +1352,8 @@ Arguments:
 Returns:      TRUE if what is matched could be empty
 */
 
+#if !JAVASCRIPT
+
 static BOOL
 could_be_empty(const uschar *code, const uschar *endcode, branch_chain *bcptr,
   BOOL utf8)
@@ -1323,6 +1365,8 @@ while (bcptr != NULL && bcptr->current >= code)
   }
 return TRUE;
 }
+
+#endif
 
 
 
@@ -1343,6 +1387,8 @@ Argument:
 Returns:   TRUE or FALSE
 */
 
+#if !JAVASCRIPT
+
 static BOOL
 check_posix_syntax(const pcre_uchar *ptr, const pcre_uchar **endptr, compile_data *cd)
 {
@@ -1357,6 +1403,8 @@ if (*ptr == terminator && ptr[1] == ']')
   }
 return FALSE;
 }
+
+#endif
 
 #if PCRE_UTF16
 
@@ -1391,6 +1439,8 @@ Arguments:
 Returns:     a value representing the name, or -1 if unknown
 */
 
+#if !JAVASCRIPT
+
 static int
 check_posix_name(const pcre_uchar *ptr, int len)
 {
@@ -1403,6 +1453,8 @@ while (posix_name_lengths[yield] != 0)
   }
 return -1;
 }
+
+#endif
 
 
 /*************************************************
@@ -1637,7 +1689,9 @@ for (;; ptr++)
   int class_charcount;
   int class_lastchar;
   int newoptions;
+#if !JAVASCRIPT
   int recno;
+#endif
   int skipbytes;
   int subreqbyte;
   int subfirstbyte;
@@ -1648,6 +1702,7 @@ for (;; ptr++)
 
   c = *ptr;
 
+#if !JAVASCRIPT
   /* If in \Q...\E, check for the end; if not, we have a literal */
 
   if (inescq && c != 0)
@@ -1673,6 +1728,7 @@ for (;; ptr++)
       goto NORMAL_CHAR;
       }
     }
+#endif
 
   /* Fill in length of a previous callout, except when the next thing is
   a quantifier. */
@@ -1768,12 +1824,14 @@ for (;; ptr++)
     /* PCRE supports POSIX class stuff inside a class. Perl gives an error if
     they are encountered at the top level, so we'll do that too. */
 
+#if !JAVASCRIPT
     if ((ptr[1] == ':' || ptr[1] == '.' || ptr[1] == '=') &&
         check_posix_syntax(ptr, &tempptr, cd))
       {
       *errorcodeptr = (ptr[1] == ':')? ERR13 : ERR31;
       goto FAILED;
       }
+#endif
 
     /* If the first character is '^', set the negation flag and skip it. */
 
@@ -1820,6 +1878,8 @@ for (;; ptr++)
         GETCHARLEN(c, ptr, ptr);    /* macro generates multiple statements */
         }
 #endif
+
+#if !JAVASCRIPT
 
       /* Inside \Q...\E everything is literal except \E */
 
@@ -1906,6 +1966,8 @@ for (;; ptr++)
         continue;    /* End of POSIX syntax handling */
         }
 
+#endif
+
       /* Backslash may introduce a single character, or it may introduce one
       of the specials, which just set a flag. Escaped items are checked for
       validity in the pre-compiling pass. The sequence \b is a special case.
@@ -1954,16 +2016,19 @@ for (;; ptr++)
 
             case ESC_s:
             for (c = 0; c < 32; c++) classbits[c] |= cbits[c+cbit_space];
-            /* JavaScript does not omit VT, so we leave out the following line: */
-            /* classbits[1] &= ~0x08;   Perl 5.004 onwards omits VT from \s */
+#if !JAVASCRIPT
+            classbits[1] &= ~0x08;   /* Perl 5.004 onwards omits VT from \s */
+#endif
             continue;
 
             case ESC_S:
             for (c = 0; c < 32; c++) classbits[c] |= ~cbits[c+cbit_space];
-            /* JavaScript does not omit VT, so we leave out the following line: */
-            /* classbits[1] |= 0x08;    Perl 5.004 onwards omits VT from \s */
+#if !JAVASCRIPT
+            classbits[1] |= 0x08;    /* Perl 5.004 onwards omits VT from \s */
+#endif
             continue;
 
+#if !JAVASCRIPT
 #ifdef SUPPORT_UCP
             case ESC_p:
             case ESC_P:
@@ -1978,6 +2043,7 @@ for (;; ptr++)
               class_charcount -= 2;   /* Not a < 256 character */
               }
             continue;
+#endif
 #endif
 
             /* Unrecognized escapes are faulted if PCRE is running in its
@@ -2815,21 +2881,26 @@ for (;; ptr++)
 
     if (*(++ptr) == '?')
       {
+#if !JAVASCRIPT
       int set, unset;
       int *optset;
+#endif
 
       switch (*(++ptr))
         {
+#if !JAVASCRIPT
         case '#':                 /* Comment; skip to ket */
         ptr++;
         while (*ptr != ')') ptr++;
         continue;
+#endif
 
         case ':':                 /* Non-extracting bracket */
         bravalue = OP_BRA;
         ptr++;
         break;
 
+#if !JAVASCRIPT
         case '(':
         bravalue = OP_COND;       /* Conditional group */
 
@@ -2865,6 +2936,7 @@ for (;; ptr++)
         /* For conditions that are assertions, we just fall through, having
         set bravalue above. */
         break;
+#endif
 
         case '=':                 /* Positive lookahead */
         bravalue = OP_ASSERT;
@@ -2876,6 +2948,7 @@ for (;; ptr++)
         ptr++;
         break;
 
+#if !JAVASCRIPT
         case '<':                 /* Lookbehinds */
         switch (*(++ptr))
           {
@@ -3049,10 +3122,15 @@ for (;; ptr++)
           code += 1 + LINK_SIZE;
           }
         continue;
+#endif
 
         /* Character after (? not specially recognized */
 
         default:                  /* Option setting */
+#if JAVASCRIPT
+        *errorcodeptr = ERR12;
+        goto FAILED;
+#else
         set = unset = 0;
         optset = &set;
 
@@ -3114,6 +3192,7 @@ for (;; ptr++)
 
         bravalue = OP_BRA;
         ptr++;
+#endif
         }
       }
 
@@ -3131,7 +3210,9 @@ for (;; ptr++)
 
     else
       {
+#if !JAVASCRIPT
       NUMBERED_GROUP:
+#endif
       if (++(*brackets) > EXTRACT_BASIC_MAX)
         {
         bravalue = OP_BRA + EXTRACT_BASIC_MAX + 1;
@@ -3312,6 +3393,7 @@ for (;; ptr++)
       /* So are Unicode property matches, if supported. We know that get_ucp
       won't fail because it was tested in the pre-pass. */
 
+#if !JAVASCRIPT
 #ifdef SUPPORT_UCP
       else if (-c == ESC_P || -c == ESC_p)
         {
@@ -3321,6 +3403,7 @@ for (;; ptr++)
         *code++ = ((-c == ESC_p) != negated)? OP_PROP : OP_NOTPROP;
         *code++ = value;
         }
+#endif
 #endif
 
       /* For the rest, we can obtain the OP value by negating the escape
@@ -4075,6 +4158,8 @@ while ((c = *(++ptr)) != 0)
       continue;
       }
 
+#if !JAVASCRIPT
+
     /* If \Q, enter "literal" mode */
 
     if (-c == ESC_Q)
@@ -4109,6 +4194,8 @@ while ((c = *(++ptr)) != 0)
       goto PCRE_ERROR_RETURN;
 #endif
       }
+
+#endif
 
     /* Other escapes need one byte */
 
@@ -4274,14 +4361,18 @@ while ((c = *(++ptr)) != 0)
           }
         }
 
+#if !JAVASCRIPT
+
       /* Check the syntax for POSIX stuff. The bits we actually handle are
       checked during the real compile phase. */
 
-      else if (*ptr == '[' && check_posix_syntax(ptr, &ptr, &compile_block))
+      else if (*ptr == '[' && (ptr[1] == ':' || ptr[1] == '.' || ptr[1] == '=') && check_posix_syntax(ptr, &ptr, &compile_block))
         {
         ptr++;
         class_optcount = 10;    /* Make sure > 1 */
         }
+
+#endif
 
       /* Anything else increments the possible optimization count. We have to
       detect ranges here so that we can compute the number of extra ranges for
@@ -4481,11 +4572,14 @@ while ((c = *(++ptr)) != 0)
 
     if (ptr[1] == '?')
       {
+#if !JAVASCRIPT
       int set, unset;
       int *optset;
+#endif
 
       switch (c = ptr[2])
         {
+#if !JAVASCRIPT
         /* Skip over comments entirely */
         case '#':
         ptr += 3;
@@ -4496,6 +4590,7 @@ while ((c = *(++ptr)) != 0)
           goto PCRE_ERROR_RETURN;
           }
         continue;
+#endif
 
         /* Non-referencing groups and lookaheads just move the pointer on, and
         then behave like a non-special bracket, except that they don't increment
@@ -4505,7 +4600,9 @@ while ((c = *(++ptr)) != 0)
         case ':':
         case '=':
         case '!':
+#if !JAVASCRIPT
         case '>':
+#endif
         ptr += 2;
         break;
 
@@ -4516,6 +4613,8 @@ while ((c = *(++ptr)) != 0)
         From PCRE 4.00, items such as (?3) specify subroutine-like "calls" to
         the appropriate numbered brackets. This includes both recursive and
         non-recursive calls. (?R) is now synonymous with (?0). */
+
+#if !JAVASCRIPT
 
         case 'R':
         ptr++;
@@ -4648,12 +4747,18 @@ while ((c = *(++ptr)) != 0)
           }
         break;
 
+#endif
+
         /* Else loop checking valid options until ) is met. Anything else is an
         error. If we are without any brackets, i.e. at top level, the settings
         act as if specified in the options, so massage the options immediately.
         This is for backward compatibility with Perl 5.004. */
 
         default:
+#if JAVASCRIPT
+        errorcode = ERR12;
+        goto PCRE_ERROR_RETURN;
+#else
         set = unset = 0;
         optset = &set;
         ptr += 2;
@@ -4770,6 +4875,7 @@ while ((c = *(++ptr)) != 0)
 
         /* If options were terminated by ':' control comes here. Fall through
         to handle the group below. */
+#endif
         }
       }
 
@@ -4823,7 +4929,9 @@ while ((c = *(++ptr)) != 0)
     brackets so that the quantifier works. The value of duplength must be
     set before arrival. */
 
+#if !JAVASCRIPT
     HANDLE_QUANTIFIED_BRACKETS:
+#endif
 
     /* Leave ptr at the final char; for read_repeat_counts this happens
     automatically; for the others we need an increment. */
