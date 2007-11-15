@@ -521,7 +521,9 @@ namespace KJS {
                    ReferenceError = 3,
                    SyntaxError    = 4,
                    TypeError      = 5,
-                   URIError       = 6};
+                   URIError       = 6,
+                   TimeoutError   = 7
+  };
 
   /**
    * @short Factory methods for error objects.

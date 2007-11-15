@@ -33,10 +33,10 @@ static JSValueRef print(JSContextRef context, JSObjectRef object, JSObjectRef th
 
 int main(int argc, char* argv[])
 {
-	const char *scriptPath = "minicom.js";
-	if (argc > 1) {
-		scriptPath = argv[1];
-	}
+    const char *scriptPath = "minidom.js";
+    if (argc > 1) {
+        scriptPath = argv[1];
+    }
     
     JSGlobalContextRef context = JSGlobalContextCreate(NULL);
     JSObjectRef globalObject = JSContextGetGlobalObject(context);

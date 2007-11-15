@@ -95,6 +95,7 @@ namespace KJS {
     virtual void breakCycle() { }
 
   protected:
+    Completion createInterruptedCompletion(ExecState *);
     Completion createErrorCompletion(ExecState *, ErrorType, const char *msg);
     Completion createErrorCompletion(ExecState *, ErrorType, const char *msg, const Identifier &);
 

@@ -336,7 +336,8 @@ namespace KJS {
     void pauseTimeoutCheck();
     void resumeTimeoutCheck();
     
-    virtual bool checkTimeout();
+    virtual bool shouldStopExecution() { return false; }
+    bool checkTimeout();
     
     void ref() { ++m_refCount; }
     void deref() { if (--m_refCount <= 0) delete this; }

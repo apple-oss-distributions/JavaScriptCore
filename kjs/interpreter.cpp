@@ -61,13 +61,20 @@
 
 namespace KJS {
 
+    
+typedef enum {
+    NotTimedOut,
+    TimedOut,
+    NotChecked
+} TimeoutState;
+    
 class TimeoutChecker {
 public:
     void startTimeoutCheck(Interpreter*);
     void stopTimeoutCheck(Interpreter*);
     void pauseTimeoutCheck(Interpreter*);
     void resumeTimeoutCheck(Interpreter*);
-    bool timedOut(Interpreter* interpreter);
+    TimeoutState timedOut(Interpreter* interpreter);
 private:
     timeval m_startTime;
     timeval m_pauseTime;
@@ -131,7 +138,7 @@ void TimeoutChecker::resumeTimeoutCheck(Interpreter* interpreter)
 
 #define TimeCheckCount  1000
 
-bool TimeoutChecker::timedOut(Interpreter* interpreter)
+TimeoutState TimeoutChecker::timedOut(Interpreter* interpreter)
 {
     interpreter->m_timeoutCheckCount++;
     if (interpreter->m_timeoutCheckCount == TimeCheckCount) {
@@ -142,16 +149,22 @@ bool TimeoutChecker::timedOut(Interpreter* interpreter)
         if (millisecondsEllapsed > interpreter->m_timeoutTime) {
             m_startTime.tv_sec = currentTime.tv_sec;
             m_startTime.tv_usec = currentTime.tv_usec;
-            return true;
+            return TimedOut;
+        } else {
+            return NotTimedOut;
         }
     }    
-    return false;    
+    return NotChecked;    
 }
 
 bool Interpreter::checkTimeout()
 {
-    if (m_timeoutChecker && m_timeoutChecker->timedOut(this))
-        return handleTimeout();
+    if (m_timeoutChecker) {
+        // If the timeout was checked and there was no timeout, allow subclasses to cancel execution at this point.
+        TimeoutState timeoutState = m_timeoutChecker->timedOut(this);
+        if (timeoutState == TimedOut || (timeoutState == NotTimedOut && shouldStopExecution()))
+            return handleTimeout();
+    }
     return false;
 }
 

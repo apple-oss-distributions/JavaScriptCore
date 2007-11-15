@@ -193,6 +193,11 @@ static inline const UString& currentSourceURL(ExecState* exec)
     return exec->context()->currentBody()->sourceURL();
 }
 
+Completion Node::createInterruptedCompletion(ExecState * exec)
+{
+    return Completion(Interrupted, Error::create(exec, TimeoutError, "JavaScript execution exceeded timeout.", lineNo(), currentSourceId(exec), currentSourceURL(exec)));
+}
+
 Completion Node::createErrorCompletion(ExecState* exec, ErrorType e, const char *msg)
 {
     return Completion(Throw, Error::create(exec, e, msg, lineNo(), currentSourceId(exec), currentSourceURL(exec)));
@@ -1714,8 +1719,8 @@ Completion DoWhileNode::execute(ExecState *exec)
     exec->context()->popIteration();
     
     if (exec->dynamicInterpreter()->checkTimeout())
-        return Completion(Interrupted);
-
+        return createInterruptedCompletion(exec);
+    
     if (!((c.complType() == Continue) && ls.contains(c.target()))) {
       if ((c.complType() == Break) && ls.contains(c.target()))
         return Completion(Normal, 0);
@@ -1762,7 +1767,7 @@ Completion WhileNode::execute(ExecState *exec)
     exec->context()->popIteration();
 
     if (exec->dynamicInterpreter()->checkTimeout())
-        return Completion(Interrupted);
+        return createInterruptedCompletion(exec);
     
     if (c.isValueCompletion())
       value = c.value();
@@ -1817,7 +1822,7 @@ Completion ForNode::execute(ExecState *exec)
     }
     
     if (exec->dynamicInterpreter()->checkTimeout())
-        return Completion(Interrupted);
+        return createInterruptedCompletion(exec);
     
     if (expr3) {
       v = expr3->evaluate(exec);

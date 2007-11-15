@@ -468,10 +468,10 @@ static void testInitializeFinalize()
 
 int main(int argc, char* argv[])
 {
-	const char *scriptPath = "minicom.js";
-	if (argc > 1) {
-		scriptPath = argv[1];
-	}
+    const char *scriptPath = "testapi.js";
+    if (argc > 1) {
+        scriptPath = argv[1];
+    }
     
     // Test garbage collection with a fresh context
     context = JSGlobalContextCreate(NULL);
