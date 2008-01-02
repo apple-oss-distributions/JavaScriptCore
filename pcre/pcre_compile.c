@@ -540,7 +540,7 @@ else
 #if JAVASCRIPT
     case 'u':
     c = 0;
-    while (i++ < 4 && (DIGITAB(ptr[1]) & ctype_xdigit) != 0)
+    while (i++ < 4 && ptr + 1 < patternEnd && (DIGITAB(ptr[1]) & ctype_xdigit) != 0)
       {
       int cc;                               /* Some compilers don't like ++ */
       cc = *(++ptr);                        /* in initializers */
