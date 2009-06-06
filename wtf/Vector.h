@@ -1,4 +1,3 @@
-// -*- mode: c++; c-basic-offset: 4 -*-
 /*
  *  Copyright (C) 2005, 2006, 2007, 2008 Apple Inc. All rights reserved.
  *
@@ -25,6 +24,7 @@
 #include "Assertions.h"
 #include "FastMalloc.h"
 #include "Noncopyable.h"
+#include "NotFound.h"
 #include "VectorTraits.h"
 #include <limits>
 #include <stdlib.h>
@@ -35,7 +35,33 @@ namespace WTF {
 
     using std::min;
     using std::max;
-    
+
+    // WTF_ALIGN_OF / WTF_ALIGNED
+    #if COMPILER(GCC) || COMPILER(MINGW) || COMPILER(RVCT) || COMPILER(WINSCW)
+        #define WTF_ALIGN_OF(type) __alignof__(type)
+        #define WTF_ALIGNED(variable_type, variable, n) variable_type variable __attribute__((__aligned__(n)))
+    #elif COMPILER(MSVC)
+        #define WTF_ALIGN_OF(type) __alignof(type)
+        #define WTF_ALIGNED(variable_type, variable, n) __declspec(align(n)) variable_type variable
+    #else
+        #error WTF_ALIGN macros need alignment control.
+    #endif
+
+    #if COMPILER(GCC) && (((__GNUC__ * 100) + __GNUC_MINOR__) >= 303)
+        typedef char __attribute__((__may_alias__)) AlignedBufferChar; 
+    #else
+        typedef char AlignedBufferChar; 
+    #endif
+
+    template <size_t size, size_t alignment> struct AlignedBuffer;
+    template <size_t size> struct AlignedBuffer<size, 1> { AlignedBufferChar buffer[size]; };
+    template <size_t size> struct AlignedBuffer<size, 2> { WTF_ALIGNED(AlignedBufferChar, buffer[size], 2);  };
+    template <size_t size> struct AlignedBuffer<size, 4> { WTF_ALIGNED(AlignedBufferChar, buffer[size], 4);  };
+    template <size_t size> struct AlignedBuffer<size, 8> { WTF_ALIGNED(AlignedBufferChar, buffer[size], 8);  };
+    template <size_t size> struct AlignedBuffer<size, 16> { WTF_ALIGNED(AlignedBufferChar, buffer[size], 16); };
+    template <size_t size> struct AlignedBuffer<size, 32> { WTF_ALIGNED(AlignedBufferChar, buffer[size], 32); };
+    template <size_t size> struct AlignedBuffer<size, 64> { WTF_ALIGNED(AlignedBufferChar, buffer[size], 64); };
+
     template <bool needsDestruction, typename T>
     class VectorDestructor;
 
@@ -245,7 +271,6 @@ namespace WTF {
     public:
         void allocateBuffer(size_t newCapacity)
         {
-            ASSERT(newCapacity >= m_capacity);
             m_capacity = newCapacity;
             if (newCapacity > std::numeric_limits<size_t>::max() / sizeof(T))
                 CRASH();
@@ -254,11 +279,16 @@ namespace WTF {
 
         void deallocateBuffer(T* bufferToDeallocate)
         {
+            if (m_buffer == bufferToDeallocate) {
+                m_buffer = 0;
+                m_capacity = 0;
+            }
             fastFree(bufferToDeallocate);
         }
 
         T* buffer() { return m_buffer; }
         const T* buffer() const { return m_buffer; }
+        T** bufferSlot() { return &m_buffer; }
         size_t capacity() const { return m_capacity; }
 
         T* releaseBuffer()
@@ -318,11 +348,14 @@ namespace WTF {
             std::swap(m_buffer, other.m_buffer);
             std::swap(m_capacity, other.m_capacity);
         }
+        
+        void restoreInlineBufferIfNeeded() { }
 
         using Base::allocateBuffer;
         using Base::deallocateBuffer;
 
         using Base::buffer;
+        using Base::bufferSlot;
         using Base::capacity;
 
         using Base::releaseBuffer;
@@ -344,8 +377,7 @@ namespace WTF {
         VectorBuffer(size_t capacity)
             : Base(inlineBuffer(), inlineCapacity)
         {
-            if (capacity > inlineCapacity)
-                allocateBuffer(capacity);
+            allocateBuffer(capacity);
         }
 
         ~VectorBuffer()
@@ -353,7 +385,11 @@ namespace WTF {
             deallocateBuffer(buffer());
         }
 
-        using Base::allocateBuffer;
+        void allocateBuffer(size_t newCapacity)
+        {
+            if (newCapacity > inlineCapacity)
+                Base::allocateBuffer(newCapacity);
+        }
 
         void deallocateBuffer(T* bufferToDeallocate)
         {
@@ -361,8 +397,17 @@ namespace WTF {
                 return;
             Base::deallocateBuffer(bufferToDeallocate);
         }
+        
+        void restoreInlineBufferIfNeeded()
+        {
+            if (m_buffer)
+                return;
+            m_buffer = inlineBuffer();
+            m_capacity = inlineCapacity;
+        }
 
         using Base::buffer;
+        using Base::bufferSlot;
         using Base::capacity;
 
         T* releaseBuffer()
@@ -378,15 +423,13 @@ namespace WTF {
 
         static const size_t m_inlineBufferSize = inlineCapacity * sizeof(T);
 #if PLATFORM(ARM)
-        T *inlineBuffer() { return reinterpret_cast<T*>((void*)((&m_inlineBuffer))); }
-
-        __attribute__ ((aligned (4))) char m_inlineBuffer[m_inlineBufferSize];
+        // FIXME: <rdar://problem/6546253&6546260>
+        T* inlineBuffer() { return reinterpret_cast<T*>(static_cast<void*>(m_inlineBuffer.buffer)); }
 #else
-        T* inlineBuffer() { return reinterpret_cast<T*>(&m_inlineBuffer); }
-
-        // FIXME: Nothing guarantees this buffer is appropriately aligned to hold objects of type T.
-        char m_inlineBuffer[m_inlineBufferSize];
+        T* inlineBuffer() { return reinterpret_cast<T*>(m_inlineBuffer.buffer); }
 #endif
+
+        AlignedBuffer<m_inlineBufferSize, WTF_ALIGN_OF(T)> m_inlineBuffer;
     };
 
     template<typename T, size_t inlineCapacity = 0>
@@ -410,12 +453,13 @@ namespace WTF {
             : m_size(size)
             , m_buffer(size)
         {
-            TypeOperations::initialize(begin(), end());
+            if (begin())
+                TypeOperations::initialize(begin(), end());
         }
 
         ~Vector()
         {
-            clear();
+            if (m_size) shrink(0);
         }
 
         Vector(const Vector&);
@@ -446,6 +490,7 @@ namespace WTF {
 
         T* data() { return m_buffer.buffer(); }
         const T* data() const { return m_buffer.buffer(); }
+        T** dataSlot() { return m_buffer.bufferSlot(); }
 
         iterator begin() { return data(); }
         iterator end() { return begin() + m_size; }
@@ -457,17 +502,22 @@ namespace WTF {
         T& last() { return at(size() - 1); }
         const T& last() const { return at(size() - 1); }
 
+        template<typename U> size_t find(const U&) const;
+
         void shrink(size_t size);
         void grow(size_t size);
         void resize(size_t size);
         void reserveCapacity(size_t newCapacity);
+        void reserveInitialCapacity(size_t initialCapacity);
+        void shrinkCapacity(size_t newCapacity);
+        void shrinkToFit() { shrinkCapacity(size()); }
 
-        void clear() { if (m_size) shrink(0); }
+        void clear() { shrinkCapacity(0); }
 
         template<typename U> void append(const U*, size_t);
         template<typename U> void append(const U&);
         template<typename U> void uncheckedAppend(const U& val);
-        template<typename U, size_t c> void append(const Vector<U, c>&);
+        template<size_t otherCapacity> void append(const Vector<T, otherCapacity>&);
 
         template<typename U> void insert(size_t position, const U*, size_t);
         template<typename U> void insert(size_t position, const U&);
@@ -478,6 +528,7 @@ namespace WTF {
         template<typename U, size_t c> void prepend(const Vector<U, c>&);
 
         void remove(size_t position);
+        void remove(size_t position, size_t length);
 
         void removeLast() 
         {
@@ -489,7 +540,8 @@ namespace WTF {
             : m_size(size)
             , m_buffer(size)
         {
-            TypeOperations::uninitializedFill(begin(), end(), val);
+            if (begin())
+                TypeOperations::uninitializedFill(begin(), end(), val);
         }
 
         void fill(const T&, size_t);
@@ -519,7 +571,8 @@ namespace WTF {
         : m_size(other.size())
         , m_buffer(other.capacity())
     {
-        TypeOperations::uninitializedCopy(other.begin(), other.end(), begin());
+        if (begin())
+            TypeOperations::uninitializedCopy(other.begin(), other.end(), begin());
     }
 
     template<typename T, size_t inlineCapacity>
@@ -528,7 +581,8 @@ namespace WTF {
         : m_size(other.size())
         , m_buffer(other.capacity())
     {
-        TypeOperations::uninitializedCopy(other.begin(), other.end(), begin());
+        if (begin())
+            TypeOperations::uninitializedCopy(other.begin(), other.end(), begin());
     }
 
     template<typename T, size_t inlineCapacity>
@@ -542,6 +596,8 @@ namespace WTF {
         else if (other.size() > capacity()) {
             clear();
             reserveCapacity(other.size());
+            if (!begin())
+                return *this;
         }
         
         std::copy(other.begin(), other.begin() + size(), begin());
@@ -563,6 +619,8 @@ namespace WTF {
         else if (other.size() > capacity()) {
             clear();
             reserveCapacity(other.size());
+            if (!begin())
+                return *this;
         }
         
         std::copy(other.begin(), other.begin() + size(), begin());
@@ -573,6 +631,17 @@ namespace WTF {
     }
 
     template<typename T, size_t inlineCapacity>
+    template<typename U>
+    size_t Vector<T, inlineCapacity>::find(const U& value) const
+    {
+        for (size_t i = 0; i < size(); ++i) {
+            if (at(i) == value)
+                return i;
+        }
+        return notFound;
+    }
+
+    template<typename T, size_t inlineCapacity>
     void Vector<T, inlineCapacity>::fill(const T& val, size_t newSize)
     {
         if (size() > newSize)
@@ -580,6 +649,8 @@ namespace WTF {
         else if (newSize > capacity()) {
             clear();
             reserveCapacity(newSize);
+            if (!begin())
+                return;
         }
         
         std::fill(begin(), end(), val);
@@ -628,7 +699,8 @@ namespace WTF {
         else {
             if (size > capacity())
                 expandCapacity(size);
-            TypeOperations::initialize(end(), begin() + size);
+            if (begin())
+                TypeOperations::initialize(end(), begin() + size);
         }
         
         m_size = size;
@@ -648,7 +720,8 @@ namespace WTF {
         ASSERT(size >= m_size);
         if (size > capacity())
             expandCapacity(size);
-        TypeOperations::initialize(end(), begin() + size);
+        if (begin())
+            TypeOperations::initialize(end(), begin() + size);
         m_size = size;
     }
 
@@ -660,8 +733,39 @@ namespace WTF {
         T* oldBuffer = begin();
         T* oldEnd = end();
         m_buffer.allocateBuffer(newCapacity);
-        TypeOperations::move(oldBuffer, oldEnd, begin());
+        if (begin())
+            TypeOperations::move(oldBuffer, oldEnd, begin());
         m_buffer.deallocateBuffer(oldBuffer);
+    }
+    
+    template<typename T, size_t inlineCapacity>
+    inline void Vector<T, inlineCapacity>::reserveInitialCapacity(size_t initialCapacity)
+    {
+        ASSERT(!m_size);
+        ASSERT(capacity() == inlineCapacity);
+        if (initialCapacity > inlineCapacity)
+            m_buffer.allocateBuffer(initialCapacity);
+    }
+    
+    template<typename T, size_t inlineCapacity>
+    void Vector<T, inlineCapacity>::shrinkCapacity(size_t newCapacity)
+    {
+        if (newCapacity >= capacity())
+            return;
+
+        if (newCapacity < size()) 
+            shrink(newCapacity);
+
+        T* oldBuffer = begin();
+        if (newCapacity > 0) {
+            T* oldEnd = end();
+            m_buffer.allocateBuffer(newCapacity);
+            if (begin() != oldBuffer)
+                TypeOperations::move(oldBuffer, oldEnd, begin());
+        }
+
+        m_buffer.deallocateBuffer(oldBuffer);
+        m_buffer.restoreInlineBufferIfNeeded();
     }
 
     // Templatizing these is better than just letting the conversion happen implicitly,
@@ -672,8 +776,13 @@ namespace WTF {
     void Vector<T, inlineCapacity>::append(const U* data, size_t dataSize)
     {
         size_t newSize = m_size + dataSize;
-        if (newSize > capacity())
+        if (newSize > capacity()) {
             data = expandCapacity(newSize, data);
+            if (!begin())
+                return;
+        }
+        if (newSize < m_size)
+            CRASH();
         T* dest = end();
         for (size_t i = 0; i < dataSize; ++i)
             new (&dest[i]) T(data[i]);
@@ -684,8 +793,11 @@ namespace WTF {
     inline void Vector<T, inlineCapacity>::append(const U& val)
     {
         const U* ptr = &val;
-        if (size() == capacity())
+        if (size() == capacity()) {
             ptr = expandCapacity(size() + 1, ptr);
+            if (!begin())
+                return;
+        }
             
 #if COMPILER(MSVC7)
         // FIXME: MSVC7 generates compilation errors when trying to assign
@@ -713,8 +825,11 @@ namespace WTF {
         ++m_size;
     }
 
-    template<typename T, size_t inlineCapacity> template<typename U, size_t c>
-    inline void Vector<T, inlineCapacity>::append(const Vector<U, c>& val)
+    // This method should not be called append, a better name would be appendElements.
+    // It could also be eliminated entirely, and call sites could just use
+    // appendRange(val.begin(), val.end()).
+    template<typename T, size_t inlineCapacity> template<size_t otherCapacity>
+    inline void Vector<T, inlineCapacity>::append(const Vector<T, otherCapacity>& val)
     {
         append(val.begin(), val.size());
     }
@@ -724,8 +839,13 @@ namespace WTF {
     {
         ASSERT(position <= size());
         size_t newSize = m_size + dataSize;
-        if (newSize > capacity())
+        if (newSize > capacity()) {
             data = expandCapacity(newSize, data);
+            if (!begin())
+                return;
+        }
+        if (newSize < m_size)
+            CRASH();
         T* spot = begin() + position;
         TypeOperations::moveOverlapping(spot, end(), spot + dataSize);
         for (size_t i = 0; i < dataSize; ++i)
@@ -738,8 +858,11 @@ namespace WTF {
     {
         ASSERT(position <= size());
         const U* data = &val;
-        if (size() == capacity())
+        if (size() == capacity()) {
             data = expandCapacity(size() + 1, data);
+            if (!begin())
+                return;
+        }
         T* spot = begin() + position;
         TypeOperations::moveOverlapping(spot, end(), spot + 1);
         new (spot) T(*data);
@@ -781,6 +904,18 @@ namespace WTF {
     }
 
     template<typename T, size_t inlineCapacity>
+    inline void Vector<T, inlineCapacity>::remove(size_t position, size_t length)
+    {
+        ASSERT(position < size());
+        ASSERT(position + length < size());
+        T* beginSpot = begin() + position;
+        T* endSpot = beginSpot + length;
+        TypeOperations::destruct(beginSpot, endSpot); 
+        TypeOperations::moveOverlapping(endSpot, end(), beginSpot);
+        m_size -= length;
+    }
+
+    template<typename T, size_t inlineCapacity>
     inline T* Vector<T, inlineCapacity>::releaseBuffer()
     {
         T* buffer = m_buffer.releaseBuffer();
@@ -792,7 +927,6 @@ namespace WTF {
             buffer = static_cast<T*>(fastMalloc(bytes));
             memcpy(buffer, data(), bytes);
         }
-        ASSERT(buffer);
         m_size = 0;
         return buffer;
     }
