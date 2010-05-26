@@ -26,8 +26,6 @@
 #ifndef AssemblerBuffer_h
 #define AssemblerBuffer_h
 
-#include <wtf/Platform.h>
-
 #if ENABLE(ASSEMBLER)
 
 #include "stdint.h"
@@ -95,12 +93,14 @@ namespace JSC {
 
         void putIntUnchecked(int value)
         {
+            ASSERT(!(m_size > m_capacity - 4));
             *reinterpret_cast<int*>(&m_buffer[m_size]) = value;
             m_size += 4;
         }
 
         void putInt64Unchecked(int64_t value)
         {
+            ASSERT(!(m_size > m_capacity - 8));
             *reinterpret_cast<int64_t*>(&m_buffer[m_size]) = value;
             m_size += 8;
         }
@@ -137,10 +137,19 @@ namespace JSC {
             return memcpy(result, m_buffer, m_size);
         }
 
-    private:
-        void grow()
+    protected:
+        void append(const char* data, int size)
         {
-            m_capacity += m_capacity / 2;
+            if (m_size > m_capacity - size)
+                grow(size);
+
+            memcpy(m_buffer + m_size, data, size);
+            m_size += size;
+        }
+
+        void grow(int extraCapacity = 0)
+        {
+            m_capacity += m_capacity / 2 + extraCapacity;
 
             if (m_buffer == m_inlineBuffer) {
                 char* newBuffer = static_cast<char*>(fastMalloc(m_capacity));

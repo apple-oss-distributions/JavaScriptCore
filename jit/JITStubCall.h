@@ -26,7 +26,7 @@
 #ifndef JITStubCall_h
 #define JITStubCall_h
 
-#include <wtf/Platform.h>
+#include "MacroAssemblerCodeRef.h"
 
 #if ENABLE(JIT)
 
@@ -36,64 +36,122 @@ namespace JSC {
     public:
         JITStubCall(JIT* jit, JSObject* (JIT_STUB *stub)(STUB_ARGS_DECLARATION))
             : m_jit(jit)
-            , m_stub(reinterpret_cast<void*>(stub))
-            , m_returnType(Value)
-            , m_argumentIndex(1) // Index 0 is reserved for restoreArgumentReference();
+            , m_stub(stub)
+            , m_returnType(Cell)
+            , m_stackIndex(JITSTACKFRAME_ARGS_INDEX)
         {
         }
 
         JITStubCall(JIT* jit, JSPropertyNameIterator* (JIT_STUB *stub)(STUB_ARGS_DECLARATION))
             : m_jit(jit)
-            , m_stub(reinterpret_cast<void*>(stub))
-            , m_returnType(Value)
-            , m_argumentIndex(1) // Index 0 is reserved for restoreArgumentReference();
+            , m_stub(stub)
+            , m_returnType(Cell)
+            , m_stackIndex(JITSTACKFRAME_ARGS_INDEX)
         {
         }
 
         JITStubCall(JIT* jit, void* (JIT_STUB *stub)(STUB_ARGS_DECLARATION))
             : m_jit(jit)
-            , m_stub(reinterpret_cast<void*>(stub))
-            , m_returnType(Value)
-            , m_argumentIndex(1) // Index 0 is reserved for restoreArgumentReference();
+            , m_stub(stub)
+            , m_returnType(VoidPtr)
+            , m_stackIndex(JITSTACKFRAME_ARGS_INDEX)
         {
         }
 
         JITStubCall(JIT* jit, int (JIT_STUB *stub)(STUB_ARGS_DECLARATION))
             : m_jit(jit)
-            , m_stub(reinterpret_cast<void*>(stub))
-            , m_returnType(Value)
-            , m_argumentIndex(1) // Index 0 is reserved for restoreArgumentReference();
+            , m_stub(stub)
+            , m_returnType(Int)
+            , m_stackIndex(JITSTACKFRAME_ARGS_INDEX)
+        {
+        }
+
+        JITStubCall(JIT* jit, bool (JIT_STUB *stub)(STUB_ARGS_DECLARATION))
+            : m_jit(jit)
+            , m_stub(stub)
+            , m_returnType(Int)
+            , m_stackIndex(JITSTACKFRAME_ARGS_INDEX)
         {
         }
 
         JITStubCall(JIT* jit, void (JIT_STUB *stub)(STUB_ARGS_DECLARATION))
             : m_jit(jit)
-            , m_stub(reinterpret_cast<void*>(stub))
+            , m_stub(stub)
             , m_returnType(Void)
-            , m_argumentIndex(1) // Index 0 is reserved for restoreArgumentReference();
+            , m_stackIndex(JITSTACKFRAME_ARGS_INDEX)
         {
         }
 
+#if USE(JSVALUE32_64)
+        JITStubCall(JIT* jit, EncodedJSValue (JIT_STUB *stub)(STUB_ARGS_DECLARATION))
+            : m_jit(jit)
+            , m_stub(stub)
+            , m_returnType(Value)
+            , m_stackIndex(JITSTACKFRAME_ARGS_INDEX)
+        {
+        }
+#endif
+
         // Arguments are added first to last.
+
+        void skipArgument()
+        {
+            m_stackIndex += stackIndexStep;
+        }
 
         void addArgument(JIT::Imm32 argument)
         {
-            m_jit->poke(argument, m_argumentIndex);
-            ++m_argumentIndex;
+            m_jit->poke(argument, m_stackIndex);
+            m_stackIndex += stackIndexStep;
         }
 
         void addArgument(JIT::ImmPtr argument)
         {
-            m_jit->poke(argument, m_argumentIndex);
-            ++m_argumentIndex;
+            m_jit->poke(argument, m_stackIndex);
+            m_stackIndex += stackIndexStep;
         }
 
         void addArgument(JIT::RegisterID argument)
         {
-            m_jit->poke(argument, m_argumentIndex);
-            ++m_argumentIndex;
+            m_jit->poke(argument, m_stackIndex);
+            m_stackIndex += stackIndexStep;
+        }
+        
+#if USE(JSVALUE32_64)
+        void addArgument(const JSValue& value)
+        {
+            m_jit->poke(JIT::Imm32(value.payload()), m_stackIndex);
+            m_jit->poke(JIT::Imm32(value.tag()), m_stackIndex + 1);
+            m_stackIndex += stackIndexStep;
+        }
+#endif
+
+        void addArgument(JIT::RegisterID tag, JIT::RegisterID payload)
+        {
+            m_jit->poke(payload, m_stackIndex);
+            m_jit->poke(tag, m_stackIndex + 1);
+            m_stackIndex += stackIndexStep;
         }
 
+#if USE(JSVALUE32_64)
+        void addArgument(unsigned srcVirtualRegister)
+        {
+            if (m_jit->m_codeBlock->isConstantRegisterIndex(srcVirtualRegister)) {
+                addArgument(m_jit->getConstantOperand(srcVirtualRegister));
+                return;
+            }
+
+            m_jit->emitLoad(srcVirtualRegister, JIT::regT1, JIT::regT0);
+            addArgument(JIT::regT1, JIT::regT0);
+        }
+
+        void getArgument(size_t argumentNumber, JIT::RegisterID tag, JIT::RegisterID payload)
+        {
+            size_t stackIndex = JITSTACKFRAME_ARGS_INDEX + (argumentNumber * stackIndexStep);
+            m_jit->peek(payload, stackIndex);
+            m_jit->peek(tag, stackIndex + 1);
+        }
+#else
         void addArgument(unsigned src, JIT::RegisterID scratchRegister) // src is a virtual register.
         {
             if (m_jit->m_codeBlock->isConstantRegisterIndex(src))
@@ -104,6 +162,7 @@ namespace JSC {
             }
             m_jit->killLastResultRegister();
         }
+#endif
 
         JIT::Call call()
         {
@@ -114,28 +173,49 @@ namespace JSC {
 
             m_jit->restoreArgumentReference();
             JIT::Call call = m_jit->call();
-            m_jit->m_calls.append(CallRecord(call, m_jit->m_bytecodeIndex, m_stub));
+            m_jit->m_calls.append(CallRecord(call, m_jit->m_bytecodeIndex, m_stub.value()));
 
 #if ENABLE(OPCODE_SAMPLING)
             if (m_jit->m_bytecodeIndex != (unsigned)-1)
                 m_jit->sampleInstruction(m_jit->m_codeBlock->instructions().begin() + m_jit->m_bytecodeIndex, false);
 #endif
 
+#if USE(JSVALUE32_64)
+            m_jit->unmap();
+#else
             m_jit->killLastResultRegister();
+#endif
             return call;
         }
 
+#if USE(JSVALUE32_64)
         JIT::Call call(unsigned dst) // dst is a virtual register.
         {
-            ASSERT(m_returnType == Value);
+            ASSERT(m_returnType == Value || m_returnType == Cell);
+            JIT::Call call = this->call();
+            if (m_returnType == Value)
+                m_jit->emitStore(dst, JIT::regT1, JIT::regT0);
+            else
+                m_jit->emitStoreCell(dst, JIT::returnValueRegister);
+            return call;
+        }
+#else
+        JIT::Call call(unsigned dst) // dst is a virtual register.
+        {
+            ASSERT(m_returnType == VoidPtr || m_returnType == Cell);
             JIT::Call call = this->call();
             m_jit->emitPutVirtualRegister(dst);
             return call;
         }
+#endif
 
-        JIT::Call call(JIT::RegisterID dst)
+        JIT::Call call(JIT::RegisterID dst) // dst is a machine register.
         {
-            ASSERT(m_returnType == Value);
+#if USE(JSVALUE32_64)
+            ASSERT(m_returnType == Value || m_returnType == VoidPtr || m_returnType == Int || m_returnType == Cell);
+#else
+            ASSERT(m_returnType == VoidPtr || m_returnType == Int || m_returnType == Cell);
+#endif
             JIT::Call call = this->call();
             if (dst != JIT::returnValueRegister)
                 m_jit->move(JIT::returnValueRegister, dst);
@@ -143,25 +223,12 @@ namespace JSC {
         }
 
     private:
+        static const size_t stackIndexStep = sizeof(EncodedJSValue) == 2 * sizeof(void*) ? 2 : 1;
+
         JIT* m_jit;
-        void* m_stub;
-        enum { Value, Void } m_returnType;
-        size_t m_argumentIndex;
-    };
-
-    class CallEvalJITStub : public JITStubCall {
-    public:
-        CallEvalJITStub(JIT* jit, Instruction* instruction)
-            : JITStubCall(jit, JITStubs::cti_op_call_eval)
-        {
-            int callee = instruction[2].u.operand;
-            int argCount = instruction[3].u.operand;
-            int registerOffset = instruction[4].u.operand;
-
-            addArgument(callee, JIT::regT2);
-            addArgument(JIT::Imm32(registerOffset));
-            addArgument(JIT::Imm32(argCount));
-        }
+        FunctionPtr m_stub;
+        enum { Void, VoidPtr, Int, Value, Cell } m_returnType;
+        size_t m_stackIndex;
     };
 }
 

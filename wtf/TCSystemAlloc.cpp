@@ -31,6 +31,15 @@
 // Author: Sanjay Ghemawat
 
 #include "config.h"
+#include "TCSystemAlloc.h"
+
+#include <algorithm>
+#include <fcntl.h>
+#include "Assertions.h"
+#include "TCSpinLock.h"
+#include "UnusedParam.h"
+#include "VMTags.h"
+
 #if HAVE(STDINT_H)
 #include <stdint.h>
 #elif HAVE(INTTYPES_H)
@@ -38,22 +47,20 @@
 #else
 #include <sys/types.h>
 #endif
-#if PLATFORM(WIN_OS)
+
+#if OS(WINDOWS)
 #include "windows.h"
 #else
 #include <errno.h>
 #include <unistd.h>
 #include <sys/mman.h>
 #endif
-#include <fcntl.h>
-#include "Assertions.h"
-#include "TCSystemAlloc.h"
-#include "TCSpinLock.h"
-#include "UnusedParam.h"
 
 #ifndef MAP_ANONYMOUS
 #define MAP_ANONYMOUS MAP_ANON
 #endif
+
+using namespace std;
 
 // Structure for discovering alignment
 union MemoryAligner {
@@ -172,7 +179,7 @@ static void* TryMmap(size_t size, size_t *actual_size, size_t alignment) {
   void* result = mmap(NULL, size + extra,
                       PROT_READ | PROT_WRITE,
                       MAP_PRIVATE|MAP_ANONYMOUS,
-                      -1, 0);
+                      VM_TAG_FOR_TCMALLOC_MEMORY, 0);
   if (result == reinterpret_cast<void*>(MAP_FAILED)) {
     mmap_failure = true;
     return NULL;
@@ -441,6 +448,32 @@ void TCMalloc_SystemRelease(void* start, size_t length)
   ASSERT_UNUSED(newAddress, newAddress == start || newAddress == reinterpret_cast<void*>(MAP_FAILED));
 }
 
+#elif HAVE(VIRTUALALLOC)
+
+void TCMalloc_SystemRelease(void* start, size_t length)
+{
+    if (VirtualFree(start, length, MEM_DECOMMIT))
+        return;
+
+    // The decommit may fail if the memory region consists of allocations
+    // from more than one call to VirtualAlloc.  In this case, fall back to
+    // using VirtualQuery to retrieve the allocation boundaries and decommit
+    // them each individually.
+
+    char* ptr = static_cast<char*>(start);
+    char* end = ptr + length;
+    MEMORY_BASIC_INFORMATION info;
+    while (ptr < end) {
+        size_t resultSize = VirtualQuery(ptr, &info, sizeof(info));
+        ASSERT_UNUSED(resultSize, resultSize == sizeof(info));
+
+        size_t decommitSize = min<size_t>(info.RegionSize, end - ptr);
+        BOOL success = VirtualFree(ptr, decommitSize, MEM_DECOMMIT);
+        ASSERT_UNUSED(success, success);
+        ptr += decommitSize;
+    }
+}
+
 #else
 
 // Platforms that don't support returning memory use an empty inline version of TCMalloc_SystemRelease
@@ -457,8 +490,28 @@ void TCMalloc_SystemCommit(void* start, size_t length)
 
 #elif HAVE(VIRTUALALLOC)
 
-void TCMalloc_SystemCommit(void*, size_t)
+void TCMalloc_SystemCommit(void* start, size_t length)
 {
+    if (VirtualAlloc(start, length, MEM_COMMIT, PAGE_READWRITE) == start)
+        return;
+
+    // The commit may fail if the memory region consists of allocations
+    // from more than one call to VirtualAlloc.  In this case, fall back to
+    // using VirtualQuery to retrieve the allocation boundaries and commit them
+    // each individually.
+
+    char* ptr = static_cast<char*>(start);
+    char* end = ptr + length;
+    MEMORY_BASIC_INFORMATION info;
+    while (ptr < end) {
+        size_t resultSize = VirtualQuery(ptr, &info, sizeof(info));
+        ASSERT_UNUSED(resultSize, resultSize == sizeof(info));
+
+        size_t commitSize = min<size_t>(info.RegionSize, end - ptr);
+        void* newAddress = VirtualAlloc(ptr, commitSize, MEM_COMMIT, PAGE_READWRITE);
+        ASSERT_UNUSED(newAddress, newAddress == ptr);
+        ptr += commitSize;
+    }
 }
 
 #else
