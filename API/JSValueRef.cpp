@@ -129,10 +129,10 @@ bool JSValueIsObjectOfClass(JSContextRef ctx, JSValueRef value, JSClassRef jsCla
     JSValue jsValue = toJS(exec, value);
     
     if (JSObject* o = jsValue.getObject()) {
-        if (o->inherits(&JSCallbackObject<JSGlobalObject>::info))
+        if (o->inherits(&JSCallbackObject<JSGlobalObject>::s_info))
             return static_cast<JSCallbackObject<JSGlobalObject>*>(o)->inherits(jsClass);
-        else if (o->inherits(&JSCallbackObject<JSObject>::info))
-            return static_cast<JSCallbackObject<JSObject>*>(o)->inherits(jsClass);
+        if (o->inherits(&JSCallbackObject<JSObjectWithGlobalObject>::s_info))
+            return static_cast<JSCallbackObject<JSObjectWithGlobalObject>*>(o)->inherits(jsClass);
     }
     return false;
 }
@@ -213,7 +213,13 @@ JSValueRef JSValueMakeNumber(JSContextRef ctx, double value)
     ExecState* exec = toJS(ctx);
     APIEntryShim entryShim(exec);
 
-    return toRef(exec, jsNumber(exec, value));
+    // Our JSValue representation relies on a standard bit pattern for NaN. NaNs
+    // generated internally to JavaScriptCore naturally have that representation,
+    // but an external NaN might not.
+    if (isnan(value))
+        value = NaN;
+
+    return toRef(exec, jsNumber(value));
 }
 
 JSValueRef JSValueMakeString(JSContextRef ctx, JSStringRef string)
@@ -246,7 +252,7 @@ JSStringRef JSValueCreateJSONString(JSContextRef ctx, JSValueRef apiValue, unsig
         exec->clearException();
         return 0;
     }
-    return OpaqueJSString::create(result).releaseRef();
+    return OpaqueJSString::create(result).leakRef();
 }
 
 bool JSValueToBoolean(JSContextRef ctx, JSValueRef value)
@@ -289,7 +295,7 @@ JSStringRef JSValueToStringCopy(JSContextRef ctx, JSValueRef value, JSValueRef* 
         exec->clearException();
         stringRef.clear();
     }
-    return stringRef.release().releaseRef();
+    return stringRef.release().leakRef();
 }
 
 JSObjectRef JSValueToObject(JSContextRef ctx, JSValueRef value, JSValueRef* exception)
