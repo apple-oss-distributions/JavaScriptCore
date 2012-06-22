@@ -37,23 +37,80 @@ namespace JSC {
     class IdentifierArena {
         WTF_MAKE_FAST_ALLOCATED;
     public:
-        ALWAYS_INLINE const Identifier& makeIdentifier(JSGlobalData*, const UChar* characters, size_t length);
+        IdentifierArena()
+        {
+            clear();
+        }
+
+        template <typename T>
+        ALWAYS_INLINE const Identifier& makeIdentifier(JSGlobalData*, const T* characters, size_t length);
+        ALWAYS_INLINE const Identifier& makeIdentifierLCharFromUChar(JSGlobalData*, const UChar* characters, size_t length);
+
         const Identifier& makeNumericIdentifier(JSGlobalData*, double number);
 
-        void clear() { m_identifiers.clear(); }
         bool isEmpty() const { return m_identifiers.isEmpty(); }
 
-    private:
+    public:
+        static const int MaximumCachableCharacter = 128;
         typedef SegmentedVector<Identifier, 64> IdentifierVector;
+        void clear()
+        {
+            m_identifiers.clear();
+            for (int i = 0; i < MaximumCachableCharacter; i++)
+                m_shortIdentifiers[i] = 0;
+            for (int i = 0; i < MaximumCachableCharacter; i++)
+                m_recentIdentifiers[i] = 0;
+        }
+
+    private:
         IdentifierVector m_identifiers;
+        FixedArray<Identifier*, MaximumCachableCharacter> m_shortIdentifiers;
+        FixedArray<Identifier*, MaximumCachableCharacter> m_recentIdentifiers;
     };
 
-    ALWAYS_INLINE const Identifier& IdentifierArena::makeIdentifier(JSGlobalData* globalData, const UChar* characters, size_t length)
+    template <typename T>
+    ALWAYS_INLINE const Identifier& IdentifierArena::makeIdentifier(JSGlobalData* globalData, const T* characters, size_t length)
     {
+        if (characters[0] >= MaximumCachableCharacter) {
+            m_identifiers.append(Identifier(globalData, characters, length));
+            return m_identifiers.last();
+        }
+        if (length == 1) {
+            if (Identifier* ident = m_shortIdentifiers[characters[0]])
+                return *ident;
+            m_identifiers.append(Identifier(globalData, characters, length));
+            m_shortIdentifiers[characters[0]] = &m_identifiers.last();
+            return m_identifiers.last();
+        }
+        Identifier* ident = m_recentIdentifiers[characters[0]];
+        if (ident && Identifier::equal(ident->impl(), characters, length))
+            return *ident;
         m_identifiers.append(Identifier(globalData, characters, length));
+        m_recentIdentifiers[characters[0]] = &m_identifiers.last();
         return m_identifiers.last();
     }
 
+    ALWAYS_INLINE const Identifier& IdentifierArena::makeIdentifierLCharFromUChar(JSGlobalData* globalData, const UChar* characters, size_t length)
+    {
+        if (characters[0] >= MaximumCachableCharacter) {
+            m_identifiers.append(Identifier::createLCharFromUChar(globalData, characters, length));
+            return m_identifiers.last();
+        }
+        if (length == 1) {
+            if (Identifier* ident = m_shortIdentifiers[characters[0]])
+                return *ident;
+            m_identifiers.append(Identifier(globalData, characters, length));
+            m_shortIdentifiers[characters[0]] = &m_identifiers.last();
+            return m_identifiers.last();
+        }
+        Identifier* ident = m_recentIdentifiers[characters[0]];
+        if (ident && Identifier::equal(ident->impl(), characters, length))
+            return *ident;
+        m_identifiers.append(Identifier::createLCharFromUChar(globalData, characters, length));
+        m_recentIdentifiers[characters[0]] = &m_identifiers.last();
+        return m_identifiers.last();
+    }
+    
     inline const Identifier& IdentifierArena::makeNumericIdentifier(JSGlobalData* globalData, double number)
     {
         m_identifiers.append(Identifier(globalData, UString::number(number)));
@@ -91,7 +148,7 @@ namespace JSC {
 
         void* allocateDeletable(size_t size)
         {
-            ParserArenaDeletable* deletable = static_cast<ParserArenaDeletable*>(fastMalloc(size));
+            ParserArenaDeletable* deletable = static_cast<ParserArenaDeletable*>(allocateFreeable(size));
             m_deletableObjects.append(deletable);
             return deletable;
         }
@@ -102,9 +159,14 @@ namespace JSC {
         void removeLast();
 
         bool isEmpty() const;
-        void reset();
+        JS_EXPORT_PRIVATE void reset();
 
-        IdentifierArena& identifierArena() { return *m_identifierArena; }
+        IdentifierArena& identifierArena()
+        {
+            if (UNLIKELY (!m_identifierArena))
+                m_identifierArena = adoptPtr(new IdentifierArena);
+            return *m_identifierArena;
+        }
 
     private:
         static const size_t freeablePoolSize = 8000;

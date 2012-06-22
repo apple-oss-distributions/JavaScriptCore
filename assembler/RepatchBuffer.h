@@ -26,8 +26,9 @@
 #ifndef RepatchBuffer_h
 #define RepatchBuffer_h
 
-#if ENABLE(ASSEMBLER)
+#if ENABLE(JIT)
 
+#include "CodeBlock.h"
 #include <MacroAssembler.h>
 #include <wtf/Noncopyable.h>
 
@@ -85,6 +86,11 @@ public:
     void repatch(CodeLocationDataLabel32 dataLabel32, int32_t value)
     {
         MacroAssembler::repatchInt32(dataLabel32, value);
+    }
+
+    void repatch(CodeLocationDataLabelCompact dataLabelCompact, int32_t value)
+    {
+        MacroAssembler::repatchCompact(dataLabelCompact, value);
     }
 
     void repatch(CodeLocationDataLabelPtr dataLabelPtr, void* value)

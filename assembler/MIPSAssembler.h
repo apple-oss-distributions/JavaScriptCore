@@ -32,6 +32,7 @@
 #if ENABLE(ASSEMBLER) && CPU(MIPS)
 
 #include "AssemblerBuffer.h"
+#include "JITCompilationEffort.h"
 #include <wtf/Assertions.h>
 #include <wtf/SegmentedVector.h>
 
@@ -645,19 +646,17 @@ public:
         return m_buffer.codeSize();
     }
 
-    void* executableCopy(ExecutablePool* allocator)
+    PassRefPtr<ExecutableMemoryHandle> executableCopy(JSGlobalData& globalData, void* ownerUID, JITCompilationEffort effort)
     {
-        void *result = m_buffer.executableCopy(allocator);
+        RefPtr<ExecutableMemoryHandle> result = m_buffer.executableCopy(globalData, ownerUID, effort);
         if (!result)
             return 0;
 
-        relocateJumps(m_buffer.data(), result);
-        return result;
+        relocateJumps(m_buffer.data(), result->start());
+        return result.release();
     }
 
-#ifndef NDEBUG
     unsigned debugOffset() { return m_buffer.debugOffset(); }
-#endif
 
     static unsigned getCallReturnOffset(AssemblerLabel call)
     {
@@ -746,9 +745,42 @@ public:
         ExecutableAllocator::cacheFlush(insn, 2 * sizeof(MIPSWord));
     }
 
+    static int32_t readInt32(void* from)
+    {
+        MIPSWord* insn = reinterpret_cast<MIPSWord*>(from);
+        ASSERT((*insn & 0xffe00000) == 0x3c000000); // lui
+        int32_t result = (*insn & 0x0000ffff) << 16;
+        insn++;
+        ASSERT((*insn & 0xfc000000) == 0x34000000); // ori
+        result |= *insn & 0x0000ffff;
+        return result;
+    }
+    
+    static void repatchCompact(void* where, int32_t value)
+    {
+        repatchInt32(where, value);
+    }
+
     static void repatchPointer(void* from, void* to)
     {
         repatchInt32(from, reinterpret_cast<int32_t>(to));
+    }
+
+    static void* readPointer(void* from)
+    {
+        return reinterpret_cast<void*>(readInt32(from));
+    }
+
+    static void* readCallTarget(void* from)
+    {
+        MIPSWord* insn = reinterpret_cast<MIPSWord*>(from);
+        insn -= 4;
+        ASSERT((*insn & 0xffe00000) == 0x3c000000); // lui
+        int32_t result = (*insn & 0x0000ffff) << 16;
+        insn++;
+        ASSERT((*insn & 0xfc000000) == 0x34000000); // ori
+        result |= *insn & 0x0000ffff;
+        return reinterpret_cast<void*>(result);
     }
 
 private:

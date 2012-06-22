@@ -28,6 +28,8 @@
 #define YarrPattern_h
 
 #include <runtime/UString.h>
+#include <wtf/CheckedArithmetic.h>
+#include <wtf/RefCounted.h>
 #include <wtf/Vector.h>
 #include <wtf/unicode/Unicode.h>
 
@@ -96,6 +98,7 @@ struct PatternTerm {
         TypeForwardReference,
         TypeParenthesesSubpattern,
         TypeParentheticalAssertion,
+        TypeDotStarEnclosure,
     } type;
     bool m_capture :1;
     bool m_invert :1;
@@ -110,9 +113,13 @@ struct PatternTerm {
             bool isCopy;
             bool isTerminal;
         } parentheses;
+        struct {
+            bool bolAnchor : 1;
+            bool eolAnchor : 1;
+        } anchors;
     };
     QuantifierType quantityType;
-    unsigned quantityCount;
+    Checked<unsigned> quantityCount;
     int inputPosition;
     unsigned frameLocation;
 
@@ -168,6 +175,17 @@ struct PatternTerm {
         quantityCount = 1;
     }
 
+    PatternTerm(bool bolAnchor, bool eolAnchor)
+        : type(TypeDotStarEnclosure)
+        , m_capture(false)
+        , m_invert(false)
+    {
+        anchors.bolAnchor = bolAnchor;
+        anchors.eolAnchor = eolAnchor;
+        quantityType = QuantifierFixedCount;
+        quantityCount = 1;
+    }
+    
     static PatternTerm ForwardReference()
     {
         return PatternTerm(TypeForwardReference);
@@ -298,7 +316,7 @@ struct TermChain {
 };
 
 struct YarrPattern {
-    YarrPattern(const UString& pattern, bool ignoreCase, bool multiline, const char** error);
+    JS_EXPORT_PRIVATE YarrPattern(const UString& pattern, bool ignoreCase, bool multiline, const char** error);
 
     ~YarrPattern()
     {

@@ -72,8 +72,9 @@ namespace JSC {
         int firstLine() const { return m_firstLine; }
         int startOffset() const { return m_startChar; }
         int endOffset() const { return m_endChar; }
-        const UChar* data() const { return m_provider->data() + m_startChar; }
         int length() const { return m_endChar - m_startChar; }
+        
+        SourceCode subExpression(unsigned openBrace, unsigned closeBrace, int firstLine);
 
     private:
         RefPtr<SourceProvider> m_provider;
@@ -82,9 +83,16 @@ namespace JSC {
         int m_firstLine;
     };
 
-    inline SourceCode makeSource(const UString& source, const UString& url = UString(), int firstLine = 1)
+    inline SourceCode makeSource(const UString& source, const UString& url = UString(), const TextPosition& startPosition = TextPosition::minimumPosition())
     {
-        return SourceCode(UStringSourceProvider::create(source, url), firstLine);
+        return SourceCode(UStringSourceProvider::create(source, url, startPosition), startPosition.m_line.oneBasedInt());
+    }
+
+    inline SourceCode SourceCode::subExpression(unsigned openBrace, unsigned closeBrace, int firstLine)
+    {
+        ASSERT((*provider()->data())[openBrace] == '{');
+        ASSERT((*provider()->data())[closeBrace] == '}');
+        return SourceCode(provider(), openBrace, closeBrace + 1, firstLine);
     }
 
 } // namespace JSC

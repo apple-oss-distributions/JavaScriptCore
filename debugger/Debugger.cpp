@@ -33,7 +33,7 @@ namespace {
 
 using namespace JSC;
 
-class Recompiler {
+class Recompiler : public MarkedBlock::VoidFunctor {
 public:
     Recompiler(Debugger*);
     ~Recompiler();
@@ -67,7 +67,7 @@ inline void Recompiler::operator()(JSCell* cell)
     if (!cell->inherits(&JSFunction::s_info))
         return;
 
-    JSFunction* function = asFunction(cell);
+    JSFunction* function = jsCast<JSFunction*>(cell);
     if (function->executable()->isHostFunction())
         return;
 
@@ -75,7 +75,7 @@ inline void Recompiler::operator()(JSCell* cell)
 
     // Check if the function is already in the set - if so,
     // we've already retranslated it, nothing to do here.
-    if (!m_functionExecutables.add(executable).second)
+    if (!m_functionExecutables.add(executable).isNewEntry)
         return;
 
     ExecState* exec = function->scope()->globalObject->JSGlobalObject::globalExec();
@@ -118,7 +118,7 @@ void Debugger::recompileAllJSFunctions(JSGlobalData* globalData)
         return;
 
     Recompiler recompiler(this);
-    globalData->heap.forEach(recompiler);
+    globalData->heap.objectSpace().forEachCell(recompiler);
 }
 
 JSValue evaluateInGlobalCallFrame(const UString& script, JSValue& exception, JSGlobalObject* globalObject)

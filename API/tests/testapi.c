@@ -311,8 +311,29 @@ static JSValueRef MyObject_convertToType(JSContextRef context, JSObjectRef objec
     return JSValueMakeNull(context);
 }
 
+static JSValueRef MyObject_convertToTypeWrapper(JSContextRef context, JSObjectRef object, JSType type, JSValueRef* exception)
+{
+    UNUSED_PARAM(context);
+    UNUSED_PARAM(object);
+    UNUSED_PARAM(type);
+    UNUSED_PARAM(exception);
+    // Forward to default object class
+    return 0;
+}
+
+static bool MyObject_set_nullGetForwardSet(JSContextRef ctx, JSObjectRef object, JSStringRef propertyName, JSValueRef value, JSValueRef* exception)
+{
+    UNUSED_PARAM(ctx);
+    UNUSED_PARAM(object);
+    UNUSED_PARAM(propertyName);
+    UNUSED_PARAM(value);
+    UNUSED_PARAM(exception);
+    return false; // Forward to parent class.
+}
+
 static JSStaticValue evilStaticValues[] = {
     { "nullGetSet", 0, 0, kJSPropertyAttributeNone },
+    { "nullGetForwardSet", 0, MyObject_set_nullGetForwardSet, kJSPropertyAttributeNone },
     { 0, 0, 0, 0 }
 };
 
@@ -344,13 +365,169 @@ JSClassDefinition MyObject_definition = {
     MyObject_convertToType,
 };
 
+JSClassDefinition MyObject_convertToTypeWrapperDefinition = {
+    0,
+    kJSClassAttributeNone,
+    
+    "MyObject",
+    NULL,
+    
+    NULL,
+    NULL,
+    
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    MyObject_convertToTypeWrapper,
+};
+
+JSClassDefinition MyObject_nullWrapperDefinition = {
+    0,
+    kJSClassAttributeNone,
+    
+    "MyObject",
+    NULL,
+    
+    NULL,
+    NULL,
+    
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+};
+
 static JSClassRef MyObject_class(JSContextRef context)
 {
     UNUSED_PARAM(context);
 
     static JSClassRef jsClass;
+    if (!jsClass) {
+        JSClassRef baseClass = JSClassCreate(&MyObject_definition);
+        MyObject_convertToTypeWrapperDefinition.parentClass = baseClass;
+        JSClassRef wrapperClass = JSClassCreate(&MyObject_convertToTypeWrapperDefinition);
+        MyObject_nullWrapperDefinition.parentClass = wrapperClass;
+        jsClass = JSClassCreate(&MyObject_nullWrapperDefinition);
+    }
+
+    return jsClass;
+}
+
+static JSValueRef PropertyCatchalls_getProperty(JSContextRef context, JSObjectRef object, JSStringRef propertyName, JSValueRef* exception)
+{
+    UNUSED_PARAM(context);
+    UNUSED_PARAM(object);
+    UNUSED_PARAM(propertyName);
+    UNUSED_PARAM(exception);
+
+    if (JSStringIsEqualToUTF8CString(propertyName, "x")) {
+        static size_t count;
+        if (count++ < 5)
+            return NULL;
+
+        // Swallow all .x gets after 5, returning null.
+        return JSValueMakeNull(context);
+    }
+
+    if (JSStringIsEqualToUTF8CString(propertyName, "y")) {
+        static size_t count;
+        if (count++ < 5)
+            return NULL;
+
+        // Swallow all .y gets after 5, returning null.
+        return JSValueMakeNull(context);
+    }
+    
+    if (JSStringIsEqualToUTF8CString(propertyName, "z")) {
+        static size_t count;
+        if (count++ < 5)
+            return NULL;
+
+        // Swallow all .y gets after 5, returning null.
+        return JSValueMakeNull(context);
+    }
+
+    return NULL;
+}
+
+static bool PropertyCatchalls_setProperty(JSContextRef context, JSObjectRef object, JSStringRef propertyName, JSValueRef value, JSValueRef* exception)
+{
+    UNUSED_PARAM(context);
+    UNUSED_PARAM(object);
+    UNUSED_PARAM(propertyName);
+    UNUSED_PARAM(value);
+    UNUSED_PARAM(exception);
+
+    if (JSStringIsEqualToUTF8CString(propertyName, "x")) {
+        static size_t count;
+        if (count++ < 5)
+            return false;
+
+        // Swallow all .x sets after 4.
+        return true;
+    }
+
+    return false;
+}
+
+static void PropertyCatchalls_getPropertyNames(JSContextRef context, JSObjectRef object, JSPropertyNameAccumulatorRef propertyNames)
+{
+    UNUSED_PARAM(context);
+    UNUSED_PARAM(object);
+
+    static size_t count;
+    static const char* numbers[] = { "0", "1", "2", "3", "4", "5", "6", "7", "8", "9" };
+    
+    // Provide a property of a different name every time.
+    JSStringRef propertyName = JSStringCreateWithUTF8CString(numbers[count++ % 10]);
+    JSPropertyNameAccumulatorAddName(propertyNames, propertyName);
+    JSStringRelease(propertyName);
+}
+
+JSClassDefinition PropertyCatchalls_definition = {
+    0,
+    kJSClassAttributeNone,
+    
+    "PropertyCatchalls",
+    NULL,
+    
+    NULL,
+    NULL,
+    
+    NULL,
+    NULL,
+    NULL,
+    PropertyCatchalls_getProperty,
+    PropertyCatchalls_setProperty,
+    NULL,
+    PropertyCatchalls_getPropertyNames,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+};
+
+static JSClassRef PropertyCatchalls_class(JSContextRef context)
+{
+    UNUSED_PARAM(context);
+
+    static JSClassRef jsClass;
     if (!jsClass)
-        jsClass = JSClassCreate(&MyObject_definition);
+        jsClass = JSClassCreate(&PropertyCatchalls_definition);
     
     return jsClass;
 }
@@ -501,9 +678,22 @@ static JSValueRef Base_callAsFunction(JSContextRef ctx, JSObjectRef function, JS
     return JSValueMakeNumber(ctx, 1); // distinguish base call from derived call
 }
 
+static JSValueRef Base_returnHardNull(JSContextRef ctx, JSObjectRef function, JSObjectRef thisObject, size_t argumentCount, const JSValueRef arguments[], JSValueRef* exception)
+{
+    UNUSED_PARAM(ctx);
+    UNUSED_PARAM(function);
+    UNUSED_PARAM(thisObject);
+    UNUSED_PARAM(argumentCount);
+    UNUSED_PARAM(arguments);
+    UNUSED_PARAM(exception);
+    
+    return 0; // should convert to undefined!
+}
+
 static JSStaticFunction Base_staticFunctions[] = {
     { "baseProtoDup", NULL, kJSPropertyAttributeNone },
     { "baseProto", Base_callAsFunction, kJSPropertyAttributeNone },
+    { "baseHardNull", Base_returnHardNull, kJSPropertyAttributeNone },
     { 0, 0, 0 }
 };
 
@@ -675,6 +865,17 @@ static JSObjectRef myConstructor_callAsConstructor(JSContextRef context, JSObjec
     return result;
 }
 
+static JSObjectRef myBadConstructor_callAsConstructor(JSContextRef context, JSObjectRef constructorObject, size_t argumentCount, const JSValueRef arguments[], JSValueRef* exception)
+{
+    UNUSED_PARAM(context);
+    UNUSED_PARAM(constructorObject);
+    UNUSED_PARAM(argumentCount);
+    UNUSED_PARAM(arguments);
+    UNUSED_PARAM(exception);
+    
+    return 0;
+}
+
 
 static void globalObject_initialize(JSContextRef context, JSObjectRef object)
 {
@@ -821,6 +1022,14 @@ static bool checkForCycleInPrototypeChain()
     return result;
 }
 
+static void checkConstnessInJSObjectNames()
+{
+    JSStaticFunction fun;
+    fun.name = "something";
+    JSStaticValue val;
+    val.name = "something";
+}
+
 int main(int argc, char* argv[])
 {
 #if OS(WINDOWS)
@@ -921,6 +1130,11 @@ int main(int argc, char* argv[])
     ASSERT(JSValueGetType(context, jsCFStringWithCharacters) == kJSTypeString);
     ASSERT(JSValueGetType(context, jsCFEmptyString) == kJSTypeString);
     ASSERT(JSValueGetType(context, jsCFEmptyStringWithCharacters) == kJSTypeString);
+
+    JSObjectRef propertyCatchalls = JSObjectMake(context, PropertyCatchalls_class(context), NULL);
+    JSStringRef propertyCatchallsString = JSStringCreateWithUTF8CString("PropertyCatchalls");
+    JSObjectSetProperty(context, globalObject, propertyCatchallsString, propertyCatchalls, kJSPropertyAttributeNone, NULL);
+    JSStringRelease(propertyCatchallsString);
 
     JSObjectRef myObject = JSObjectMake(context, MyObject_class(context), NULL);
     JSStringRef myObjectIString = JSStringCreateWithUTF8CString("MyObject");
@@ -1133,6 +1347,8 @@ int main(int argc, char* argv[])
     assertEqualsAsUTF8String(jsCFEmptyString, "");
     assertEqualsAsUTF8String(jsCFEmptyStringWithCharacters, "");
     
+    checkConstnessInJSObjectNames();
+    
     ASSERT(JSValueIsStrictEqual(context, jsTrue, jsTrue));
     ASSERT(!JSValueIsStrictEqual(context, jsOne, jsOneString));
 
@@ -1235,7 +1451,7 @@ int main(int argc, char* argv[])
     function = JSObjectMakeFunction(context, foo, 1, argumentNames, functionBody, NULL, 1, &exception);
     ASSERT(function && !exception);
     JSValueRef arguments[] = { JSValueMakeNumber(context, 2) };
-    v = JSObjectCallAsFunction(context, function, NULL, 1, arguments, &exception);
+    JSObjectCallAsFunction(context, function, NULL, 1, arguments, &exception);
     JSStringRelease(foo);
     JSStringRelease(functionBody);
     
@@ -1255,6 +1471,11 @@ int main(int argc, char* argv[])
     JSObjectRef myConstructor = JSObjectMakeConstructor(context, NULL, myConstructor_callAsConstructor);
     JSObjectSetProperty(context, globalObject, myConstructorIString, myConstructor, kJSPropertyAttributeNone, NULL);
     JSStringRelease(myConstructorIString);
+    
+    JSStringRef myBadConstructorIString = JSStringCreateWithUTF8CString("MyBadConstructor");
+    JSObjectRef myBadConstructor = JSObjectMakeConstructor(context, NULL, myBadConstructor_callAsConstructor);
+    JSObjectSetProperty(context, globalObject, myBadConstructorIString, myBadConstructor, kJSPropertyAttributeNone, NULL);
+    JSStringRelease(myBadConstructorIString);
     
     ASSERT(!JSObjectSetPrivate(myConstructor, (void*)1));
     ASSERT(!JSObjectGetPrivate(myConstructor));
@@ -1362,7 +1583,7 @@ int main(int argc, char* argv[])
     // an assert inside putDirect or lead to a crash during GC. <https://bugs.webkit.org/show_bug.cgi?id=25785>
     nullDefinition = kJSClassDefinitionEmpty;
     nullClass = JSClassCreate(&nullDefinition);
-    myConstructor = JSObjectMakeConstructor(context, nullClass, 0);
+    JSObjectMakeConstructor(context, nullClass, 0);
     JSClassRelease(nullClass);
 
     char* scriptUTF8 = createStringWithContentsOfFile(scriptPath);

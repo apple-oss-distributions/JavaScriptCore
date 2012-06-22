@@ -30,6 +30,7 @@
 #if ENABLE(ASSEMBLER) && CPU(ARM_TRADITIONAL)
 
 #include "AssemblerBufferWithConstantPool.h"
+#include "JITCompilationEffort.h"
 #include <wtf/Assertions.h>
 namespace JSC {
 
@@ -161,7 +162,6 @@ namespace JSC {
             VMOV_ARM = 0x0e100a10,
             VCVT_F64_S32 = 0x0eb80bc0,
             VCVT_S32_F64 = 0x0ebd0b40,
-            VCVTR_S32_F64 = 0x0ebd0bc0,
             VMRS_APSR = 0x0ef1fa10,
 #if WTF_ARM_ARCH_AT_LEAST(5)
             CLZ = 0x016f0f10,
@@ -172,6 +172,7 @@ namespace JSC {
             MOVW = 0x03000000,
             MOVT = 0x03400000,
 #endif
+            NOP = 0xe1a00000,
         };
 
         enum {
@@ -544,12 +545,6 @@ namespace JSC {
             emitDoublePrecisionInst(static_cast<ARMWord>(cc) | VCVT_S32_F64, (sd >> 1), 0, dm);
         }
 
-        void vcvtr_s32_f64_r(int sd, int dm, Condition cc = AL)
-        {
-            ASSERT(!(sd & 0x1)); // sd must be divisible by 2
-            emitDoublePrecisionInst(static_cast<ARMWord>(cc) | VCVTR_S32_F64, (sd >> 1), 0, dm);
-        }
-
         void vmrs_apsr(Condition cc = AL)
         {
             m_buffer.putInt(static_cast<ARMWord>(cc) | VMRS_APSR);
@@ -570,6 +565,11 @@ namespace JSC {
             // Cannot access to Zero memory address
             dtr_dr(true, ARMRegisters::S0, ARMRegisters::S0, ARMRegisters::S0);
 #endif
+        }
+
+        void nop()
+        {
+            m_buffer.putInt(NOP);
         }
 
         void bx(int rm, Condition cc = AL)
@@ -680,11 +680,9 @@ namespace JSC {
             return loadBranchTarget(ARMRegisters::pc, cc, useConstantPool);
         }
 
-        void* executableCopy(ExecutablePool* allocator);
+        PassRefPtr<ExecutableMemoryHandle> executableCopy(JSGlobalData&, void* ownerUID, JITCompilationEffort);
 
-#ifndef NDEBUG
         unsigned debugOffset() { return m_buffer.debugOffset(); }
-#endif
 
         // Patching helpers
 
@@ -733,6 +731,14 @@ namespace JSC {
 
         static void patchConstantPoolLoad(void* loadAddr, void* constPoolAddr);
 
+        // Read pointers
+        static void* readPointer(void* from)
+        {
+            ARMWord* insn = reinterpret_cast<ARMWord*>(from);
+            ARMWord* addr = getLdrImmAddress(insn);
+            return *reinterpret_cast<void**>(addr);
+        }
+        
         // Patch pointers
 
         static void linkPointer(void* code, AssemblerLabel from, void* to)
@@ -743,6 +749,11 @@ namespace JSC {
         static void repatchInt32(void* from, int32_t to)
         {
             patchPointerInternal(reinterpret_cast<intptr_t>(from), reinterpret_cast<void*>(to));
+        }
+        
+        static void repatchCompact(void* where, int32_t value)
+        {
+            repatchInt32(where, value);
         }
 
         static void repatchPointer(void* from, void* to)
@@ -781,6 +792,11 @@ namespace JSC {
         static void relinkCall(void* from, void* to)
         {
             patchPointerInternal(getAbsoluteJumpAddress(from), to);
+        }
+
+        static void* readCallTarget(void* from)
+        {
+            return reinterpret_cast<void*>(readPointer(reinterpret_cast<void*>(getAbsoluteJumpAddress(from))));
         }
 
         // Address operations
@@ -836,7 +852,7 @@ namespace JSC {
         // Memory load/store helpers
 
         void dataTransfer32(bool isLoad, RegisterID srcDst, RegisterID base, int32_t offset, bool bytes = false);
-        void baseIndexTransfer32(bool isLoad, RegisterID srcDst, RegisterID base, RegisterID index, int scale, int32_t offset);
+        void baseIndexTransfer32(bool isLoad, RegisterID srcDst, RegisterID base, RegisterID index, int scale, int32_t offset, bool bytes = false);
         void doubleTransfer(bool isLoad, FPRegisterID srcDst, RegisterID base, int32_t offset);
 
         // Constant pool hnadlers

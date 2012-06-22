@@ -43,9 +43,8 @@ all : \
     ErrorPrototype.lut.h \
     HeaderDetection.h \
     JSONObject.lut.h \
-    JavaScriptCore.JSVALUE32_64.exp \
-    JavaScriptCore.JSVALUE64.exp \
     JSGlobalObject.lut.h \
+    KeywordLookup.h \
     Lexer.lut.h \
     MathObject.lut.h \
     NumberConstructor.lut.h \
@@ -76,14 +75,8 @@ docs/bytecode.html: make-bytecode-docs.pl Interpreter.cpp
 RegExpJitTables.h: create_regex_tables
 	python $^ > $@
 
-# export files
-
-JavaScriptCore.JSVALUE32_64.exp: JavaScriptCore.exp JavaScriptCore.JSVALUE32_64only.exp
-	cat $^ > $@
-
-JavaScriptCore.JSVALUE64.exp: JavaScriptCore.exp JavaScriptCore.JSVALUE64only.exp
-	cat $^ > $@
-
+KeywordLookup.h: KeywordLookupGenerator.py Keywords.table
+	python $^ > $@
 
 # header detection
 

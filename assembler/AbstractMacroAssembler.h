@@ -26,21 +26,36 @@
 #ifndef AbstractMacroAssembler_h
 #define AbstractMacroAssembler_h
 
+#include "AssemblerBuffer.h"
 #include "CodeLocation.h"
 #include "MacroAssemblerCodeRef.h"
+#include <wtf/CryptographicallyRandomNumber.h>
 #include <wtf/Noncopyable.h>
 #include <wtf/UnusedParam.h>
 
 #if ENABLE(ASSEMBLER)
 
+
+#if PLATFORM(QT)
+#define ENABLE_JIT_CONSTANT_BLINDING 0
+#endif
+
+#ifndef ENABLE_JIT_CONSTANT_BLINDING
+#define ENABLE_JIT_CONSTANT_BLINDING 1
+#endif
+
 namespace JSC {
 
 class LinkBuffer;
 class RepatchBuffer;
+namespace DFG {
+class CorrectableJumpPoint;
+}
 
 template <class AssemblerType>
 class AbstractMacroAssembler {
 public:
+    friend class JITWriteBarrierBase;
     typedef AssemblerType AssemblerType_T;
 
     typedef MacroAssemblerCodePtr CodePtr;
@@ -160,6 +175,19 @@ public:
             : m_value(value)
         {
         }
+        
+        // This is only here so that TrustedImmPtr(0) does not confuse the C++
+        // overload handling rules.
+        explicit TrustedImmPtr(int value)
+            : m_value(0)
+        {
+            ASSERT_UNUSED(value, !value);
+        }
+
+        explicit TrustedImmPtr(size_t value)
+            : m_value(reinterpret_cast<void*>(value))
+        {
+        }
 
         intptr_t asIntptr()
         {
@@ -169,11 +197,19 @@ public:
         const void* m_value;
     };
 
-    struct ImmPtr : public TrustedImmPtr {
+    struct ImmPtr : 
+#if ENABLE(JIT_CONSTANT_BLINDING)
+        private TrustedImmPtr 
+#else
+        public TrustedImmPtr
+#endif
+    {
         explicit ImmPtr(const void* value)
             : TrustedImmPtr(value)
         {
         }
+
+        TrustedImmPtr asTrustedImmPtr() { return *this; }
     };
 
     // TrustedImm32:
@@ -215,7 +251,13 @@ public:
     };
 
 
-    struct Imm32 : public TrustedImm32 {
+    struct Imm32 : 
+#if ENABLE(JIT_CONSTANT_BLINDING)
+        private TrustedImm32 
+#else
+        public TrustedImm32
+#endif
+    {
         explicit Imm32(int32_t value)
             : TrustedImm32(value)
         {
@@ -226,6 +268,8 @@ public:
         {
         }
 #endif
+        const TrustedImm32& asTrustedImm32() const { return *this; }
+
     };
     
     // Section 2: MacroAssembler code buffer handles
@@ -243,6 +287,7 @@ public:
     class Label {
         template<class TemplateAssemblerType>
         friend class AbstractMacroAssembler;
+        friend class DFG::CorrectableJumpPoint;
         friend class Jump;
         friend class MacroAssemblerCodeRef;
         friend class LinkBuffer;
@@ -304,6 +349,35 @@ public:
         {
         }
 
+        AssemblerLabel label() const { return m_label; }
+
+    private:
+        AssemblerLabel m_label;
+    };
+
+    // DataLabelCompact:
+    //
+    // A DataLabelCompact is used to refer to a location in the code containing a
+    // compact immediate to be patched after the code has been generated.
+    class DataLabelCompact {
+        template<class TemplateAssemblerType>
+        friend class AbstractMacroAssembler;
+        friend class LinkBuffer;
+    public:
+        DataLabelCompact()
+        {
+        }
+        
+        DataLabelCompact(AbstractMacroAssembler<AssemblerType>* masm)
+            : m_label(masm->m_assembler.label())
+        {
+        }
+    
+        DataLabelCompact(AssemblerLabel label)
+            : m_label(label)
+        {
+        }
+
     private:
         AssemblerLabel m_label;
     };
@@ -332,7 +406,7 @@ public:
         }
         
         Call(AssemblerLabel jmp, Flags flags)
-            : m_jmp(jmp)
+            : m_label(jmp)
             , m_flags(flags)
         {
         }
@@ -344,10 +418,10 @@ public:
 
         static Call fromTailJump(Jump jump)
         {
-            return Call(jump.m_jmp, Linkable);
+            return Call(jump.m_label, Linkable);
         }
 
-        AssemblerLabel m_jmp;
+        AssemblerLabel m_label;
     private:
         Flags m_flags;
     };
@@ -362,6 +436,7 @@ public:
         template<class TemplateAssemblerType>
         friend class AbstractMacroAssembler;
         friend class Call;
+        friend class DFG::CorrectableJumpPoint;
         friend class LinkBuffer;
     public:
         Jump()
@@ -371,14 +446,20 @@ public:
 #if CPU(ARM_THUMB2)
         // Fixme: this information should be stored in the instruction stream, not in the Jump object.
         Jump(AssemblerLabel jmp, ARMv7Assembler::JumpType type, ARMv7Assembler::Condition condition = ARMv7Assembler::ConditionInvalid)
-            : m_jmp(jmp)
+            : m_label(jmp)
             , m_type(type)
             , m_condition(condition)
         {
         }
+#elif CPU(SH4)
+        Jump(AssemblerLabel jmp, SH4Assembler::JumpType type = SH4Assembler::JumpFar)
+            : m_label(jmp)
+            , m_type(type)
+        {
+        }
 #else
         Jump(AssemblerLabel jmp)    
-            : m_jmp(jmp)
+            : m_label(jmp)
         {
         }
 #endif
@@ -386,29 +467,49 @@ public:
         void link(AbstractMacroAssembler<AssemblerType>* masm) const
         {
 #if CPU(ARM_THUMB2)
-            masm->m_assembler.linkJump(m_jmp, masm->m_assembler.label(), m_type, m_condition);
+            masm->m_assembler.linkJump(m_label, masm->m_assembler.label(), m_type, m_condition);
+#elif CPU(SH4)
+            masm->m_assembler.linkJump(m_label, masm->m_assembler.label(), m_type);
 #else
-            masm->m_assembler.linkJump(m_jmp, masm->m_assembler.label());
+            masm->m_assembler.linkJump(m_label, masm->m_assembler.label());
 #endif
         }
         
         void linkTo(Label label, AbstractMacroAssembler<AssemblerType>* masm) const
         {
 #if CPU(ARM_THUMB2)
-            masm->m_assembler.linkJump(m_jmp, label.m_label, m_type, m_condition);
+            masm->m_assembler.linkJump(m_label, label.m_label, m_type, m_condition);
 #else
-            masm->m_assembler.linkJump(m_jmp, label.m_label);
+            masm->m_assembler.linkJump(m_label, label.m_label);
 #endif
         }
 
-        bool isSet() const { return m_jmp.isSet(); }
+        bool isSet() const { return m_label.isSet(); }
 
     private:
-        AssemblerLabel m_jmp;
+        AssemblerLabel m_label;
 #if CPU(ARM_THUMB2)
         ARMv7Assembler::JumpType m_type;
         ARMv7Assembler::Condition m_condition;
 #endif
+#if CPU(SH4)
+        SH4Assembler::JumpType m_type;
+#endif
+    };
+
+    struct PatchableJump {
+        PatchableJump()
+        {
+        }
+
+        explicit PatchableJump(Jump jump)
+            : m_jump(jump)
+        {
+        }
+
+        operator Jump&() { return m_jump; }
+
+        Jump m_jump;
     };
 
     // JumpList:
@@ -476,67 +577,46 @@ public:
         return Label(this);
     }
 
-    ptrdiff_t differenceBetween(Label from, Jump to)
-    {
-        return AssemblerType::getDifferenceBetweenLabels(from.m_label, to.m_jmp);
-    }
-
-    ptrdiff_t differenceBetween(Label from, Call to)
-    {
-        return AssemblerType::getDifferenceBetweenLabels(from.m_label, to.m_jmp);
-    }
-
-    ptrdiff_t differenceBetween(Label from, Label to)
+    template<typename T, typename U>
+    static ptrdiff_t differenceBetween(T from, U to)
     {
         return AssemblerType::getDifferenceBetweenLabels(from.m_label, to.m_label);
     }
 
-    ptrdiff_t differenceBetween(Label from, DataLabelPtr to)
+    static ptrdiff_t differenceBetweenCodePtr(const MacroAssemblerCodePtr& a, const MacroAssemblerCodePtr& b)
     {
-        return AssemblerType::getDifferenceBetweenLabels(from.m_label, to.m_label);
+        return reinterpret_cast<ptrdiff_t>(b.executableAddress()) - reinterpret_cast<ptrdiff_t>(a.executableAddress());
     }
 
-    ptrdiff_t differenceBetween(Label from, DataLabel32 to)
-    {
-        return AssemblerType::getDifferenceBetweenLabels(from.m_label, to.m_label);
-    }
-
-    ptrdiff_t differenceBetween(DataLabelPtr from, Jump to)
-    {
-        return AssemblerType::getDifferenceBetweenLabels(from.m_label, to.m_jmp);
-    }
-
-    ptrdiff_t differenceBetween(DataLabelPtr from, DataLabelPtr to)
-    {
-        return AssemblerType::getDifferenceBetweenLabels(from.m_label, to.m_label);
-    }
-
-    ptrdiff_t differenceBetween(DataLabelPtr from, Call to)
-    {
-        return AssemblerType::getDifferenceBetweenLabels(from.m_label, to.m_jmp);
-    }
-
-    // Temporary interface; likely to be removed, since may be hard to port to all architectures.
-#if CPU(X86) || CPU(X86_64)
-    void rewindToLabel(Label rewindTo) { m_assembler.rewindToLabel(rewindTo.m_label); }
-#endif
-
-    void beginUninterruptedSequence() { }
-    void endUninterruptedSequence() { }
-
-#ifndef NDEBUG
     unsigned debugOffset() { return m_assembler.debugOffset(); }
-#endif
 
 protected:
+    AbstractMacroAssembler()
+        : m_randomSource(cryptographicallyRandomNumber())
+    {
+    }
+
     AssemblerType m_assembler;
+    
+    uint32_t random()
+    {
+        return m_randomSource.getUint32();
+    }
+
+    WeakRandom m_randomSource;
+
+#if ENABLE(JIT_CONSTANT_BLINDING)
+    static bool scratchRegisterForBlinding() { return false; }
+    static bool shouldBlindForSpecificArch(uint32_t) { return true; }
+    static bool shouldBlindForSpecificArch(uint64_t) { return true; }
+#endif
 
     friend class LinkBuffer;
     friend class RepatchBuffer;
 
     static void linkJump(void* code, Jump jump, CodeLocationLabel target)
     {
-        AssemblerType::linkJump(code, jump.m_jmp, target.dataLocation());
+        AssemblerType::linkJump(code, jump.m_label, target.dataLocation());
     }
 
     static void linkPointer(void* code, AssemblerLabel label, void* value)
@@ -551,7 +631,7 @@ protected:
 
     static unsigned getLinkerCallReturnOffset(Call call)
     {
-        return AssemblerType::getCallReturnOffset(call.m_jmp);
+        return AssemblerType::getCallReturnOffset(call.m_label);
     }
 
     static void repatchJump(CodeLocationJump jump, CodeLocationLabel destination)
@@ -564,6 +644,11 @@ protected:
         AssemblerType::relinkCall(nearCall.dataLocation(), destination.executableAddress());
     }
 
+    static void repatchCompact(CodeLocationDataLabelCompact dataLabelCompact, int32_t value)
+    {
+        AssemblerType::repatchCompact(dataLabelCompact.dataLocation(), value);
+    }
+    
     static void repatchInt32(CodeLocationDataLabel32 dataLabel32, int32_t value)
     {
         AssemblerType::repatchInt32(dataLabel32.dataLocation(), value);
@@ -572,6 +657,23 @@ protected:
     static void repatchPointer(CodeLocationDataLabelPtr dataLabelPtr, void* value)
     {
         AssemblerType::repatchPointer(dataLabelPtr.dataLocation(), value);
+    }
+    
+    static void* readPointer(CodeLocationDataLabelPtr dataLabelPtr)
+    {
+        return AssemblerType::readPointer(dataLabelPtr.dataLocation());
+    }
+    
+    static void unreachableForPlatform()
+    {
+#if COMPILER(CLANG)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wmissing-noreturn"
+        ASSERT_NOT_REACHED();
+#pragma clang diagnostic pop
+#else
+        ASSERT_NOT_REACHED();
+#endif
     }
 };
 
