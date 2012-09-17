@@ -28,6 +28,8 @@
 #define YarrPattern_h
 
 #include <runtime/UString.h>
+#include <wtf/CheckedArithmetic.h>
+#include <wtf/RefCounted.h>
 #include <wtf/Vector.h>
 #include <wtf/unicode/Unicode.h>
 
@@ -117,7 +119,7 @@ struct PatternTerm {
         } anchors;
     };
     QuantifierType quantityType;
-    unsigned quantityCount;
+    Checked<unsigned> quantityCount;
     int inputPosition;
     unsigned frameLocation;
 
@@ -314,7 +316,7 @@ struct TermChain {
 };
 
 struct YarrPattern {
-    YarrPattern(const UString& pattern, bool ignoreCase, bool multiline, const char** error);
+    JS_EXPORT_PRIVATE YarrPattern(const UString& pattern, bool ignoreCase, bool multiline, const char** error);
 
     ~YarrPattern()
     {

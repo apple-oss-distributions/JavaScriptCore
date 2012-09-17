@@ -105,9 +105,9 @@ struct ByteTerm {
     unsigned frameLocation;
     bool m_capture : 1;
     bool m_invert : 1;
-    int inputPosition;
+    unsigned inputPosition;
 
-    ByteTerm(UChar ch, int inputPos, unsigned frameLocation, unsigned quantityCount, QuantifierType quantityType)
+    ByteTerm(UChar ch, int inputPos, unsigned frameLocation, Checked<unsigned> quantityCount, QuantifierType quantityType)
         : frameLocation(frameLocation)
         , m_capture(false)
         , m_invert(false)
@@ -126,11 +126,11 @@ struct ByteTerm {
 
         atom.patternCharacter = ch;
         atom.quantityType = quantityType;
-        atom.quantityCount = quantityCount;
+        atom.quantityCount = quantityCount.unsafeGet();
         inputPosition = inputPos;
     }
 
-    ByteTerm(UChar lo, UChar hi, int inputPos, unsigned frameLocation, unsigned quantityCount, QuantifierType quantityType)
+    ByteTerm(UChar lo, UChar hi, int inputPos, unsigned frameLocation, Checked<unsigned> quantityCount, QuantifierType quantityType)
         : frameLocation(frameLocation)
         , m_capture(false)
         , m_invert(false)
@@ -150,7 +150,7 @@ struct ByteTerm {
         atom.casedCharacter.lo = lo;
         atom.casedCharacter.hi = hi;
         atom.quantityType = quantityType;
-        atom.quantityCount = quantityCount;
+        atom.quantityCount = quantityCount.unsafeGet();
         inputPosition = inputPos;
     }
 
@@ -204,17 +204,17 @@ struct ByteTerm {
         return term;
     }
 
-    static ByteTerm CheckInput(unsigned count)
+    static ByteTerm CheckInput(Checked<unsigned> count)
     {
         ByteTerm term(TypeCheckInput);
-        term.checkInputCount = count;
+        term.checkInputCount = count.unsafeGet();
         return term;
     }
 
-    static ByteTerm UncheckInput(unsigned count)
+    static ByteTerm UncheckInput(Checked<unsigned> count)
     {
         ByteTerm term(TypeUncheckInput);
-        term.checkInputCount = count;
+        term.checkInputCount = count.unsafeGet();
         return term;
     }
     
@@ -374,6 +374,11 @@ private:
     Vector<ByteDisjunction*> m_allParenthesesInfo;
     Vector<CharacterClass*> m_userCharacterClasses;
 };
+
+JS_EXPORT_PRIVATE PassOwnPtr<BytecodePattern> byteCompile(YarrPattern&, BumpPointerAllocator*);
+JS_EXPORT_PRIVATE unsigned interpret(BytecodePattern*, const UString& input, unsigned start, unsigned* output);
+unsigned interpret(BytecodePattern*, const LChar* input, unsigned length, unsigned start, unsigned* output);
+unsigned interpret(BytecodePattern*, const UChar* input, unsigned length, unsigned start, unsigned* output);
 
 } } // namespace JSC::Yarr
 
