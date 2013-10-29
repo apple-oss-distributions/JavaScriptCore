@@ -28,6 +28,7 @@
 
 #include "CallFrame.h"
 #include "GCActivityCallback.h"
+#include "IncrementalSweeper.h"
 #include "JSLock.h"
 #include <wtf/WTFThreadData.h>
 
@@ -35,25 +36,21 @@ namespace JSC {
 
 class APIEntryShimWithoutLock {
 protected:
-    APIEntryShimWithoutLock(JSGlobalData* globalData, bool registerThread)
-        : m_globalData(globalData)
-        , m_entryIdentifierTable(wtfThreadData().setCurrentIdentifierTable(globalData->identifierTable))
+    APIEntryShimWithoutLock(VM* vm, bool registerThread)
+        : m_vm(vm)
+        , m_entryIdentifierTable(wtfThreadData().setCurrentIdentifierTable(vm->identifierTable))
     {
-        UNUSED_PARAM(registerThread);
         if (registerThread)
-            globalData->heap.machineThreads().addCurrentThread();
-        m_globalData->heap.activityCallback()->synchronize();
-        m_globalData->timeoutChecker.start();
+            vm->heap.machineThreads().addCurrentThread();
     }
 
     ~APIEntryShimWithoutLock()
     {
-        m_globalData->timeoutChecker.stop();
         wtfThreadData().setCurrentIdentifierTable(m_entryIdentifierTable);
     }
 
-private:
-    JSGlobalData* m_globalData;
+protected:
+    RefPtr<VM> m_vm;
     IdentifierTable* m_entryIdentifierTable;
 };
 
@@ -61,40 +58,45 @@ class APIEntryShim : public APIEntryShimWithoutLock {
 public:
     // Normal API entry
     APIEntryShim(ExecState* exec, bool registerThread = true)
-        : APIEntryShimWithoutLock(&exec->globalData(), registerThread)
-        , m_lock(exec)
+        : APIEntryShimWithoutLock(&exec->vm(), registerThread)
+        , m_lockHolder(exec)
     {
     }
 
-    // JSPropertyNameAccumulator only has a globalData.
-    APIEntryShim(JSGlobalData* globalData, bool registerThread = true)
-        : APIEntryShimWithoutLock(globalData, registerThread)
-        , m_lock(globalData->isSharedInstance() ? LockForReal : SilenceAssertionsOnly)
+    // JSPropertyNameAccumulator only has a vm.
+    APIEntryShim(VM* vm, bool registerThread = true)
+        : APIEntryShimWithoutLock(vm, registerThread)
+        , m_lockHolder(vm)
     {
+    }
+
+    ~APIEntryShim()
+    {
+        // Destroying our JSLockHolder should also destroy the VM.
+        m_vm.clear();
     }
 
 private:
-    JSLock m_lock;
+    JSLockHolder m_lockHolder;
 };
 
 class APICallbackShim {
 public:
     APICallbackShim(ExecState* exec)
         : m_dropAllLocks(exec)
-        , m_globalData(&exec->globalData())
+        , m_vm(&exec->vm())
     {
         wtfThreadData().resetCurrentIdentifierTable();
     }
 
     ~APICallbackShim()
     {
-        m_globalData->heap.activityCallback()->synchronize();
-        wtfThreadData().setCurrentIdentifierTable(m_globalData->identifierTable);
+        wtfThreadData().setCurrentIdentifierTable(m_vm->identifierTable);
     }
 
 private:
     JSLock::DropAllLocks m_dropAllLocks;
-    JSGlobalData* m_globalData;
+    VM* m_vm;
 };
 
 }
