@@ -29,7 +29,7 @@
 #include "ExceptionHelpers.h"
 #include "JSScope.h"
 #include "JSString.h"
-#include "Operations.h"
+#include "JSCInlines.h"
 #include <wtf/text/StringImpl.h>
 
 namespace JSC {
@@ -80,7 +80,7 @@ static inline PassRefPtr<StringImpl> joinStrings(const Vector<String>& strings, 
     CharacterType* data;
     RefPtr<StringImpl> outputStringImpl = StringImpl::tryCreateUninitialized(outputLength, data);
     if (!outputStringImpl)
-        return PassRefPtr<StringImpl>();
+        return nullptr;
 
     const String firstString = strings.first();
     appendStringToData(data, firstString);
@@ -90,7 +90,7 @@ static inline PassRefPtr<StringImpl> joinStrings(const Vector<String>& strings, 
         appendStringToData(data, strings[i]);
     }
 
-    ASSERT(data == (outputStringImpl->getCharacters<CharacterType>() + outputStringImpl->length()));
+    ASSERT(data == (outputStringImpl->characters<CharacterType>() + outputStringImpl->length()));
     return outputStringImpl.release();
 }
 
@@ -102,13 +102,13 @@ JSValue JSStringJoiner::join(ExecState* exec)
     if (!m_strings.size())
         return jsEmptyString(exec);
 
-    Checked<size_t, RecordOverflow> separatorLength = m_separator.length();
+    Checked<unsigned, RecordOverflow> separatorLength = m_separator.length();
     // FIXME: add special cases of joinStrings() for (separatorLength == 0) and (separatorLength == 1).
     ASSERT(m_strings.size() > 0);
-    Checked<size_t, RecordOverflow> totalSeparactorsLength = separatorLength * (m_strings.size() - 1);
-    Checked<size_t, RecordOverflow> outputStringSize = totalSeparactorsLength + m_accumulatedStringsLength;
+    Checked<unsigned, RecordOverflow> totalSeparactorsLength = separatorLength * (m_strings.size() - 1);
+    Checked<unsigned, RecordOverflow> outputStringSize = totalSeparactorsLength + m_accumulatedStringsLength;
 
-    size_t finalSize;
+    unsigned finalSize;
     if (outputStringSize.safeGet(finalSize) == CheckedState::DidOverflow)
         return throwOutOfMemoryError(exec);
         
