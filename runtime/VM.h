@@ -414,7 +414,6 @@ namespace JSC {
 
         JSValue hostCallReturnValue;
         ExecState* newCallFrameReturnValue;
-        unsigned varargsLength;
         ExecState* callFrameForThrow;
         void* targetMachinePCForThrow;
         Instruction* targetInterpreterPCForThrow;

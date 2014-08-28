@@ -68,7 +68,6 @@ public:
     LowerDFGToLLVM(State& state)
         : m_graph(state.graph)
         , m_ftlState(state)
-        , m_loweringSucceeded(true)
         , m_heaps(state.context)
         , m_out(state.context)
         , m_availability(OperandsLike, state.graph.block(0)->variablesAtHead)
@@ -77,12 +76,8 @@ public:
         , m_stackmapIDs(0)
     {
     }
-
-
-#define LOWERING_FAILED(node, reason)                                  \
-    loweringFailed((node), __FILE__, __LINE__, WTF_PRETTY_FUNCTION, (reason));
-
-    bool lower()
+    
+    void lower()
     {
         CString name;
         if (verboseCompilationEnabled()) {
@@ -162,16 +157,10 @@ public:
             m_out.constInt32(MacroAssembler::maxJumpReplacementSize()));
         m_out.unreachable();
         
-        if (!m_loweringSucceeded)
-            return m_loweringSucceeded;
-
         Vector<BasicBlock*> depthFirst;
         m_graph.getBlocksInDepthFirstOrder(depthFirst);
-        for (unsigned i = 0; i < depthFirst.size(); ++i) {
+        for (unsigned i = 0; i < depthFirst.size(); ++i)
             compileBlock(depthFirst[i]);
-            if (!m_loweringSucceeded)
-                return m_loweringSucceeded;
-        }
         
         if (Options::dumpLLVMIR())
             dumpModule(m_ftlState.module);
@@ -180,8 +169,6 @@ public:
             m_ftlState.dumpState("after lowering");
         if (validationEnabled())
             verifyModule(m_ftlState.module);
-
-        return m_loweringSucceeded;
     }
 
 private:
@@ -214,8 +201,8 @@ private:
                     type = m_out.int64;
                     break;
                 default:
-                    LOWERING_FAILED(node, "Bad Phi node result type");
-                    return;
+                    RELEASE_ASSERT_NOT_REACHED();
+                    break;
                 }
                 m_phis.add(node, buildAlloca(m_out.m_builder, type));
             }
@@ -644,13 +631,15 @@ private:
         case AllocationProfileWatchpoint:
             break;
         default:
-            LOWERING_FAILED(m_node, "Unrecognized node in FTL backend");
+            dataLog("Unrecognized node in FTL backend:\n");
+            m_graph.dump(WTF::dataFile(), "    ", m_node);
+            dataLog("\n");
+            dataLog("Full graph dump:\n");
+            m_graph.dump();
+            RELEASE_ASSERT_NOT_REACHED();
             break;
         }
         
-        if (!m_loweringSucceeded)
-            return false;
-
         if (shouldExecuteEffects)
             m_interpreter.executeEffects(nodeIndex);
         
@@ -681,7 +670,7 @@ private:
             m_out.set(lowJSValue(m_node->child1()), destination);
             break;
         default:
-            LOWERING_FAILED(m_node, "Bad use kind");
+            RELEASE_ASSERT_NOT_REACHED();
             break;
         }
     }
@@ -707,7 +696,7 @@ private:
             setJSValue(m_out.get(source));
             break;
         default:
-            LOWERING_FAILED(m_node, "Bad use kind");
+            RELEASE_ASSERT_NOT_REACHED();
             break;
         }
     }
@@ -750,7 +739,7 @@ private:
         }
             
         default:
-            LOWERING_FAILED(m_node, "Bad use kind");
+            RELEASE_ASSERT_NOT_REACHED();
         }
     }
     
@@ -775,7 +764,7 @@ private:
         }
             
         default:
-            LOWERING_FAILED(m_node, "Bad use kind");
+            RELEASE_ASSERT_NOT_REACHED();
         }
     }
     
@@ -799,7 +788,7 @@ private:
             return;
             
         default:
-            LOWERING_FAILED(m_node, "Bad use kind");
+            RELEASE_ASSERT_NOT_REACHED();
         }
     }
     
@@ -838,7 +827,7 @@ private:
         }
             
         default:
-            LOWERING_FAILED(m_node, "Bad use kind");
+            RELEASE_ASSERT_NOT_REACHED();
             break;
         }
     }
@@ -871,7 +860,7 @@ private:
         }
             
         default:
-            LOWERING_FAILED(m_node, "Bad flush format");
+            RELEASE_ASSERT_NOT_REACHED();
             return;
         }
     }
@@ -901,7 +890,7 @@ private:
             setJSValue(jsValue);
             break;
         default:
-            LOWERING_FAILED(m_node, "Bad use kind");
+            RELEASE_ASSERT_NOT_REACHED();
             break;
         }
     }
@@ -972,8 +961,8 @@ private:
         }
             
         default:
-            LOWERING_FAILED(m_node, "Bad flush format for argument");
-            return;
+            RELEASE_ASSERT_NOT_REACHED();
+            break;
         }
         
         m_availability.operand(variable->local()) = Availability(variable->flushedAt());
@@ -1148,7 +1137,7 @@ private:
         }
             
         default:
-            LOWERING_FAILED(m_node, "Bad use kind");
+            RELEASE_ASSERT_NOT_REACHED();
             break;
         }
     }
@@ -1222,7 +1211,7 @@ private:
         }
             
         default:
-            LOWERING_FAILED(m_node, "Bad use kind");
+            RELEASE_ASSERT_NOT_REACHED();
             break;
         }
     }
@@ -1325,7 +1314,7 @@ private:
         }
             
         default:
-            LOWERING_FAILED(m_node, "Bad use kind");
+            RELEASE_ASSERT_NOT_REACHED();
             break;
         }
     }
@@ -1423,7 +1412,7 @@ private:
         }
             
         default:
-            LOWERING_FAILED(m_node, "Bad use kind");
+            RELEASE_ASSERT_NOT_REACHED();
             break;
         }
     }
@@ -1474,7 +1463,7 @@ private:
         }
             
         default:
-            LOWERING_FAILED(m_node, "Bad use kind");
+            RELEASE_ASSERT_NOT_REACHED();
             break;
         }
     }
@@ -1500,7 +1489,7 @@ private:
         }
             
         default:
-            LOWERING_FAILED(m_node, "Bad use kind");
+            RELEASE_ASSERT_NOT_REACHED();
             break;
         }
     }
@@ -1567,7 +1556,7 @@ private:
         }
             
         default:
-            LOWERING_FAILED(m_node, "Bad use kind");
+            RELEASE_ASSERT_NOT_REACHED();
             break;
         }
     }
@@ -1733,8 +1722,8 @@ private:
             vmCall(m_out.operation(operationEnsureArrayStorage), m_callFrame, cell);
             break;
         default:
-            LOWERING_FAILED(m_node, "Bad array type");
-            return;
+            RELEASE_ASSERT_NOT_REACHED();
+            break;
         }
         
         structureID = m_out.load32(cell, m_heaps.JSCell_structureID);
@@ -1807,7 +1796,7 @@ private:
         }
             
         default:
-            LOWERING_FAILED(m_node, "Bad use kind");
+            RELEASE_ASSERT_NOT_REACHED();
             return;
         }
     }
@@ -1959,19 +1948,13 @@ private:
             // FIXME: FTL should support activations.
             // https://bugs.webkit.org/show_bug.cgi?id=129576
             
-            LOWERING_FAILED(m_node, "Unimplemented");
-            return;
+            RELEASE_ASSERT_NOT_REACHED();
         }
         
         TypedPointer base;
-        if (codeOrigin.inlineCallFrame) {
-            VirtualRegister reg;
-            if (codeOrigin.inlineCallFrame->arguments.size() <= 1)
-                reg = virtualRegisterForLocal(0); // Doesn't matter what we do since we would have exited anyway.
-            else
-                reg = codeOrigin.inlineCallFrame->arguments[1].virtualRegister();
-            base = addressFor(reg);
-        } else
+        if (codeOrigin.inlineCallFrame)
+            base = addressFor(codeOrigin.inlineCallFrame->arguments[1].virtualRegister());
+        else
             base = addressFor(virtualRegisterForArgument(1));
         
         LValue pointer = m_out.baseIndex(
@@ -2002,7 +1985,7 @@ private:
                 return;
             }
             
-            LOWERING_FAILED(m_node, "Bad array type");
+            RELEASE_ASSERT_NOT_REACHED();
             return;
         }
     }
@@ -2152,8 +2135,7 @@ private:
                         result = m_out.load32(pointer);
                         break;
                     default:
-                        LOWERING_FAILED(m_node, "Bad element size");
-                        return;
+                        RELEASE_ASSERT_NOT_REACHED();
                     }
                     
                     if (elementSize(type) < 4) {
@@ -2197,15 +2179,14 @@ private:
                     result = m_out.loadDouble(pointer);
                     break;
                 default:
-                    LOWERING_FAILED(m_node, "Bad typed array type");
-                    return;
+                    RELEASE_ASSERT_NOT_REACHED();
                 }
                 
                 setDouble(result);
                 return;
             }
             
-            LOWERING_FAILED(m_node, "Bad array type");
+            RELEASE_ASSERT_NOT_REACHED();
             return;
         } }
     }
@@ -2311,8 +2292,7 @@ private:
             }
                 
             default:
-                LOWERING_FAILED(m_node, "Bad array type");
-                return;
+                RELEASE_ASSERT_NOT_REACHED();
             }
 
             m_out.jump(continuation);
@@ -2405,8 +2385,7 @@ private:
                     }
                         
                     default:
-                        LOWERING_FAILED(m_node, "Bad use kind");
-                        return;
+                        RELEASE_ASSERT_NOT_REACHED();
                     }
                     
                     switch (elementSize(type)) {
@@ -2423,8 +2402,7 @@ private:
                         refType = m_out.ref32;
                         break;
                     default:
-                        LOWERING_FAILED(m_node, "Bad element size");
-                        return;
+                        RELEASE_ASSERT_NOT_REACHED();
                     }
                 } else /* !isInt(type) */ {
                     LValue value = lowDouble(child3);
@@ -2438,8 +2416,7 @@ private:
                         refType = m_out.refDouble;
                         break;
                     default:
-                        LOWERING_FAILED(m_node, "Bad typed array type");
-                        return;
+                        RELEASE_ASSERT_NOT_REACHED();
                     }
                 }
                 
@@ -2463,8 +2440,8 @@ private:
                 return;
             }
             
-            LOWERING_FAILED(m_node, "Bad array type");
-            return;
+            RELEASE_ASSERT_NOT_REACHED();
+            break;
         }
     }
     
@@ -2535,7 +2512,7 @@ private:
         }
             
         default:
-            LOWERING_FAILED(m_node, "Bad array type");
+            RELEASE_ASSERT_NOT_REACHED();
             return;
         }
     }
@@ -2593,7 +2570,7 @@ private:
         }
 
         default:
-            LOWERING_FAILED(m_node, "Bad array type");
+            RELEASE_ASSERT_NOT_REACHED();
             return;
         }
     }
@@ -2952,8 +2929,8 @@ private:
         }
             
         default:
-            LOWERING_FAILED(m_node, "Bad use kind");
-            return;
+            RELEASE_ASSERT_NOT_REACHED();
+            break;
         }
     }
     
@@ -3044,8 +3021,7 @@ private:
                 m_out.operation(operationMakeRope3), m_callFrame, kids[0], kids[1], kids[2]));
             break;
         default:
-            LOWERING_FAILED(m_node, "Bad number of children");
-            return;
+            RELEASE_ASSERT_NOT_REACHED();
             break;
         }
         m_out.jump(continuation);
@@ -3450,8 +3426,8 @@ private:
             nonSpeculativeCompare(LLVMIntEQ, operationCompareEq);
             return;
         }
-
-        LOWERING_FAILED(m_node, "Bad use kinds");
+        
+        RELEASE_ASSERT_NOT_REACHED();
     }
     
     void compileCompareEqConstant()
@@ -3544,7 +3520,7 @@ private:
             return;
         }
         
-        LOWERING_FAILED(m_node, "Bad use kinds");
+        RELEASE_ASSERT_NOT_REACHED();
     }
     
     void compileCompareStrictEqConstant()
@@ -3680,8 +3656,8 @@ private:
             }
                 
             default:
-                LOWERING_FAILED(m_node, "Bad use kind");
-                return;
+                RELEASE_ASSERT_NOT_REACHED();
+                break;
             }
             
             m_out.appendTo(switchOnInts, lastNext);
@@ -3726,8 +3702,8 @@ private:
             }
                 
             default:
-                LOWERING_FAILED(m_node, "Bad use kind");
-                return;
+                RELEASE_ASSERT_NOT_REACHED();
+                break;
             }
             
             LBasicBlock lengthIs1 = FTL_NEW_BLOCK(m_out, ("Switch/SwitchChar length is 1"));
@@ -3779,11 +3755,11 @@ private:
         }
         
         case SwitchString:
-            LOWERING_FAILED(m_node, "Unimplemented");
+            RELEASE_ASSERT_NOT_REACHED();
             break;
         }
         
-        LOWERING_FAILED(m_node, "Bad switch kind");
+        RELEASE_ASSERT_NOT_REACHED();
     }
     
     void compileReturn()
@@ -4240,7 +4216,7 @@ private:
             return;
         }
         
-        LOWERING_FAILED(m_node, "Bad use kinds");
+        RELEASE_ASSERT_NOT_REACHED();
     }
     
     void compareEqObjectOrOtherToObject(Edge leftChild, Edge rightChild)
@@ -4519,7 +4495,7 @@ private:
             return m_out.phi(m_out.boolean, fastResult, slowResult);
         }
         default:
-            LOWERING_FAILED(m_node, "Bad use kind");
+            RELEASE_ASSERT_NOT_REACHED();
             return 0;
         }
     }
@@ -4892,7 +4868,7 @@ private:
         case StrictInt52:
             return Int52;
         }
-        LOWERING_FAILED(m_node, "Bad use kind");
+        RELEASE_ASSERT_NOT_REACHED();
         return Int52;
     }
     
@@ -5037,7 +5013,7 @@ private:
             return result;
         }
         
-        LOWERING_FAILED(m_node, "Corrupt array class");
+        RELEASE_ASSERT_NOT_REACHED();
         return 0;
     }
     
@@ -5349,8 +5325,8 @@ private:
             speculateMisc(edge);
             break;
         default:
-            LOWERING_FAILED(m_node, "Unsupported speculation use kind");
-            return;
+            dataLog("Unsupported speculation use kind: ", edge.useKind(), "\n");
+            RELEASE_ASSERT_NOT_REACHED();
         }
     }
     
@@ -5411,7 +5387,7 @@ private:
             
             switch (arrayMode.arrayClass()) {
             case Array::OriginalArray:
-                LOWERING_FAILED(m_node, "Unexpected original array");
+                RELEASE_ASSERT_NOT_REACHED();
                 return 0;
                 
             case Array::Array:
@@ -5431,8 +5407,7 @@ private:
                     m_out.constInt8(arrayMode.shapeMask()));
             }
             
-            LOWERING_FAILED(m_node, "Corrupt array class");
-            return 0;
+            RELEASE_ASSERT_NOT_REACHED();
         }
             
         default:
@@ -6068,7 +6043,7 @@ private:
             return;
         }
         
-        LOWERING_FAILED(m_node, "Corrupt int52 kind");
+        RELEASE_ASSERT_NOT_REACHED();
     }
     void setJSValue(Node* node, LValue value)
     {
@@ -6195,24 +6170,11 @@ private:
         return addressFor(operand, TagOffset);
     }
     
-    NO_RETURN_DUE_TO_ASSERT void loweringFailed(Node* node, const char* file, int line, const char* function, const char* assertion)
-    {
-        if (!ASSERT_DISABLED) {
-            dataLog("FTL ASSERTION FAILED: ", assertion, "\n");
-            dataLog(file, "(", line, ") : ", function, "\n");
-            dataLog("While handling node ", node, "\n");
-            RELEASE_ASSERT_NOT_REACHED();
-        }
-
-        m_loweringSucceeded = false;
-    }
-
     VM& vm() { return m_graph.m_vm; }
     CodeBlock* codeBlock() { return m_graph.m_codeBlock; }
     
     Graph& m_graph;
     State& m_ftlState;
-    bool m_loweringSucceeded;
     AbstractHeapRepository m_heaps;
     Output m_out;
     
@@ -6253,10 +6215,10 @@ private:
     uint32_t m_stackmapIDs;
 };
 
-bool lowerDFGToLLVM(State& state)
+void lowerDFGToLLVM(State& state)
 {
     LowerDFGToLLVM lowering(state);
-    return lowering.lower();
+    lowering.lower();
 }
 
 } } // namespace JSC::FTL

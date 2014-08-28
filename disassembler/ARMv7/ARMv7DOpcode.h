@@ -275,7 +275,7 @@ protected:
     const char* opName() { return s_opNames[op()]; }
 
     unsigned op() { return (m_opcode >> 9) & 0x1; }
-    unsigned immediate3() { return (m_opcode >> 6) & 0x7; }
+    unsigned immediate3() { return (m_opcode >> 6) & 0x3; }
     unsigned rn() { return (m_opcode >> 3) & 0x7; }
 };
 
@@ -441,7 +441,7 @@ protected:
     unsigned immediate5() { return (m_opcode >> 6) & 0x01f; }
     unsigned rn() { return (m_opcode >> 3) & 0x7; }
     unsigned rt() { return m_opcode & 0x7; }
-    unsigned scale();
+    unsigned scale() { return 2 - (op() >> 1); }
 };
 
 class ARMv7DOpcodeLoadStoreRegisterImmediateWordAndByte : public ARMv7DOpcodeLoadStoreRegisterImmediate {
@@ -452,18 +452,10 @@ public:
     DEFINE_STATIC_FORMAT16(ARMv7DOpcodeLoadStoreRegisterImmediate, thisObj);
 };
 
-class ARMv7DOpcodeStoreRegisterImmediateHalfWord : public ARMv7DOpcodeLoadStoreRegisterImmediate {
+class ARMv7DOpcodeLoadStoreRegisterImmediateHalfWord : public ARMv7DOpcodeLoadStoreRegisterImmediate {
 public:
     static const uint16_t s_mask = 0xf800;
     static const uint16_t s_pattern = 0x8000;
-
-    DEFINE_STATIC_FORMAT16(ARMv7DOpcodeLoadStoreRegisterImmediate, thisObj);
-};
-
-class ARMv7DOpcodeLoadRegisterImmediateHalfWord : public ARMv7DOpcodeLoadStoreRegisterImmediate {
-public:
-    static const uint16_t s_mask = 0xf800;
-    static const uint16_t s_pattern = 0x8800;
 
     DEFINE_STATIC_FORMAT16(ARMv7DOpcodeLoadStoreRegisterImmediate, thisObj);
 };

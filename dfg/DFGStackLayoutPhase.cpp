@@ -105,7 +105,7 @@ public:
             usedLocals.set(codeBlock()->activationRegister().toLocal());
         for (InlineCallFrameSet::iterator iter = m_graph.m_plan.inlineCallFrames->begin(); !!iter; ++iter) {
             InlineCallFrame* inlineCallFrame = *iter;
-            if (!m_graph.usesArguments(inlineCallFrame))
+            if (!inlineCallFrame->executable->usesArguments())
                 continue;
             
             VirtualRegister argumentsRegister = m_graph.argumentsRegisterFor(inlineCallFrame);
@@ -171,7 +171,7 @@ public:
             InlineVariableData data = m_graph.m_inlineVariableData[i];
             InlineCallFrame* inlineCallFrame = data.inlineCallFrame;
             
-            if (m_graph.usesArguments(inlineCallFrame)) {
+            if (inlineCallFrame->executable->usesArguments()) {
                 inlineCallFrame->argumentsRegister = virtualRegisterForLocal(
                     allocation[m_graph.argumentsRegisterFor(inlineCallFrame).toLocal()]);
 

@@ -497,9 +497,8 @@ void Heap::markRoots(double gcStartTime)
     // We gather conservative roots before clearing mark bits because conservative
     // gathering uses the mark bits to determine whether a reference is valid.
     void* dummy;
-    ALLOCATE_AND_GET_REGISTER_STATE(registers);
     ConservativeRoots conservativeRoots(&m_objectSpace.blocks(), &m_storageSpace);
-    gatherStackRoots(conservativeRoots, &dummy, registers);
+    gatherStackRoots(conservativeRoots, &dummy);
     gatherJSStackRoots(conservativeRoots);
     gatherScratchBufferRoots(conservativeRoots);
 
@@ -559,11 +558,11 @@ void Heap::copyBackingStores()
         m_storageSpace.doneCopying();
 }
 
-void Heap::gatherStackRoots(ConservativeRoots& roots, void** dummy, MachineThreads::RegisterState& registers)
+void Heap::gatherStackRoots(ConservativeRoots& roots, void** dummy)
 {
     GCPHASE(GatherStackRoots);
     m_jitStubRoutines.clearMarks();
-    m_machineThreads.gatherConservativeRoots(roots, m_jitStubRoutines, m_codeBlocks, dummy, registers);
+    m_machineThreads.gatherConservativeRoots(roots, m_jitStubRoutines, m_codeBlocks, dummy);
 }
 
 void Heap::gatherJSStackRoots(ConservativeRoots& roots)

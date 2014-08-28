@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013-2015 Apple Inc. All rights reserved.
+ * Copyright (C) 2013 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -363,16 +363,15 @@ static void copyPrototypeProperties(JSContext *context, Class objcClass, Protoco
     JSC::Weak<JSC::JSObject> m_constructor;
 }
 
-- (id)initWithContext:(JSContext *)context forClass:(Class)cls;
+- (id)initWithContext:(JSContext *)context forClass:(Class)cls superClassInfo:(JSObjCClassInfo*)superClassInfo;
 - (JSValue *)wrapperForObject:(id)object;
 - (JSValue *)constructor;
-- (JSC::JSObject *)prototype;
 
 @end
 
 @implementation JSObjCClassInfo
 
-- (id)initWithContext:(JSContext *)context forClass:(Class)cls
+- (id)initWithContext:(JSContext *)context forClass:(Class)cls superClassInfo:(JSObjCClassInfo*)superClassInfo
 {
     self = [super init];
     if (!self)
@@ -386,6 +385,8 @@ static void copyPrototypeProperties(JSContext *context, Class objcClass, Protoco
     definition = kJSClassDefinitionEmpty;
     definition.className = className;
     m_classRef = JSClassCreate(&definition);
+
+    [self allocateConstructorAndPrototypeWithSuperClassInfo:superClassInfo];
 
     return self;
 }
@@ -448,12 +449,8 @@ static JSValue *allocateConstructorForCustomClass(JSContext *context, const char
     return constructorWithCustomBrand(context, [NSString stringWithFormat:@"%sConstructor", className], cls);
 }
 
-typedef std::pair<JSC::JSObject*, JSC::JSObject*> ConstructorPrototypePair;
-
-- (ConstructorPrototypePair)allocateConstructorAndPrototype
+- (void)allocateConstructorAndPrototypeWithSuperClassInfo:(JSObjCClassInfo*)superClassInfo
 {
-    JSObjCClassInfo* superClassInfo = [m_context.wrapperMap classInfoForClass:class_getSuperclass(m_class)];
-
     ASSERT(!m_constructor || !m_prototype);
     ASSERT((m_class == [NSObject class]) == !superClassInfo);
     if (!superClassInfo) {
@@ -467,6 +464,11 @@ typedef std::pair<JSC::JSObject*, JSC::JSObject*> ConstructorPrototypePair;
             m_prototype = toJS(JSValueToObject(cContext, valueInternalValue(prototype), 0));
         }
     } else {
+        // We need to hold a reference to the superclass prototype here on the stack
+        // to that it won't get GC'ed while we do allocations between now and when we
+        // set it in this class' prototype below.
+        JSC::JSObject* superClassPrototype = superClassInfo->m_prototype.get();
+
         const char* className = class_getName(m_class);
 
         // Create or grab the prototype/constructor pair.
@@ -496,10 +498,15 @@ typedef std::pair<JSC::JSObject*, JSC::JSObject*> ConstructorPrototypePair;
         });
 
         // Set [Prototype].
-        JSC::JSObject* superClassPrototype = [superClassInfo prototype];
         JSObjectSetPrototype([m_context JSGlobalContextRef], toRef(m_prototype.get()), toRef(superClassPrototype));
     }
-    return ConstructorPrototypePair(m_constructor.get(), m_prototype.get());
+}
+
+- (void)reallocateConstructorAndOrPrototype
+{
+    [self allocateConstructorAndPrototypeWithSuperClassInfo:[m_context.wrapperMap classInfoForClass:class_getSuperclass(m_class)]];
+    // We should not add any code here that can trigger a GC or the prototype and
+    // constructor that we just created may be collected before they can be used.
 }
 
 - (JSValue *)wrapperForObject:(id)object
@@ -516,7 +523,12 @@ typedef std::pair<JSC::JSObject*, JSC::JSObject*> ConstructorPrototypePair;
         }
     }
 
-    JSC::JSObject* prototype = [self prototype];
+    if (!m_prototype)
+        [self reallocateConstructorAndOrPrototype];
+    ASSERT(!!m_prototype);
+    // We need to hold a reference to the prototype here on the stack to that it won't
+    // get GC'ed while we create the wrapper below.
+    JSC::JSObject* prototype = m_prototype.get();
 
     JSObjectRef wrapper = makeWrapper([m_context JSGlobalContextRef], m_classRef, object);
     JSObjectSetPrototype([m_context JSGlobalContextRef], wrapper, toRef(prototype));
@@ -525,20 +537,13 @@ typedef std::pair<JSC::JSObject*, JSC::JSObject*> ConstructorPrototypePair;
 
 - (JSValue *)constructor
 {
-    JSC::JSObject* constructor = m_constructor.get();
-    if (!constructor)
-        constructor = [self allocateConstructorAndPrototype].first;
-    ASSERT(!!constructor);
-    return [JSValue valueWithJSValueRef:toRef(constructor) inContext:m_context];
-}
-
-- (JSC::JSObject*)prototype
-{
-    JSC::JSObject* prototype = m_prototype.get();
-    if (!prototype)
-        prototype = [self allocateConstructorAndPrototype].second;
-    ASSERT(!!prototype);
-    return prototype;
+    if (!m_constructor)
+        [self reallocateConstructorAndOrPrototype];
+    ASSERT(!!m_constructor);
+    // If we need to add any code here in the future that can trigger a GC, we should
+    // cache the constructor pointer in a stack local var first so that it is protected
+    // from the GC until it gets used below.
+    return [JSValue valueWithJSValueRef:toRef(m_constructor.get()) inContext:m_context];
 }
 
 @end
@@ -585,7 +590,7 @@ typedef std::pair<JSC::JSObject*, JSC::JSObject*> ConstructorPrototypePair;
     if ('_' == *class_getName(cls))
         return m_classMap[cls] = [self classInfoForClass:class_getSuperclass(cls)];
 
-    return m_classMap[cls] = [[[JSObjCClassInfo alloc] initWithContext:m_context forClass:cls] autorelease];
+    return m_classMap[cls] = [[[JSObjCClassInfo alloc] initWithContext:m_context forClass:cls superClassInfo:[self classInfoForClass:class_getSuperclass(cls)]] autorelease];
 }
 
 - (JSValue *)jsWrapperForObject:(id)object

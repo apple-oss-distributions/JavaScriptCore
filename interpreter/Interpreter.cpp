@@ -173,7 +173,6 @@ CallFrame* sizeFrameForVarargs(CallFrame* callFrame, JSStack* stack, JSValue arg
     if (asObject(arguments)->classInfo() == Arguments::info()) {
         Arguments* argsObject = asArguments(arguments);
         unsigned argCount = argsObject->length(callFrame);
-        callFrame->vm().varargsLength = argCount;
         if (argCount >= firstVarArgOffset)
             argCount -= firstVarArgOffset;
         else
@@ -205,7 +204,6 @@ CallFrame* sizeFrameForVarargs(CallFrame* callFrame, JSStack* stack, JSValue arg
 
     JSObject* argObject = asObject(arguments);
     unsigned argCount = argObject->get(callFrame, callFrame->propertyNames().length).toUInt32(callFrame);
-    callFrame->vm().varargsLength = argCount;
     if (argCount >= firstVarArgOffset)
         argCount -= firstVarArgOffset;
     else
@@ -242,8 +240,7 @@ void loadVarargs(CallFrame* callFrame, CallFrame* newCallFrame, JSValue thisValu
     
     if (asObject(arguments)->classInfo() == Arguments::info()) {
         Arguments* argsObject = asArguments(arguments);
-        unsigned argCount = callFrame->vm().varargsLength;
-        callFrame->vm().varargsLength = 0;
+        unsigned argCount = argsObject->length(callFrame);
         if (argCount >= firstVarArgOffset) {
             argCount -= firstVarArgOffset;
             newCallFrame->setArgumentCountIncludingThis(argCount + 1);
@@ -267,7 +264,8 @@ void loadVarargs(CallFrame* callFrame, CallFrame* newCallFrame, JSValue thisValu
         return;
     }
     
-    unsigned argCount = callFrame->vm().varargsLength;
+    JSObject* argObject = asObject(arguments);
+    unsigned argCount = argObject->get(callFrame, callFrame->propertyNames().length).toUInt32(callFrame);
     if (argCount >= firstVarArgOffset) {
         argCount -= firstVarArgOffset;
         newCallFrame->setArgumentCountIncludingThis(argCount + 1);

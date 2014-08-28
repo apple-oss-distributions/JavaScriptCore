@@ -2079,8 +2079,6 @@ int main(int argc, char* argv[])
         printf("PASS: global context name behaves as expected.\n");
 
     customGlobalObjectClassTest();
-    globalObjectSetPrototypeTest();
-    globalObjectPrivatePropertyTest();
 
     if (failed) {
         printf("FAIL: Some tests failed.\n");

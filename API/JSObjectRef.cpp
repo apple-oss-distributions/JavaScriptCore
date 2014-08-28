@@ -302,14 +302,6 @@ void JSObjectSetPrototype(JSContextRef ctx, JSObjectRef object, JSValueRef value
     JSObject* jsObject = toJS(object);
     JSValue jsValue = toJS(exec, value);
 
-    if (JSProxy* proxy = jsDynamicCast<JSProxy*>(jsObject)) {
-        if (JSGlobalObject* globalObject = jsDynamicCast<JSGlobalObject*>(proxy->target())) {
-            globalObject->resetPrototype(exec->vm(), jsValue.isObject() ? jsValue : jsNull());
-            return;
-        }
-        // Someday we might use proxies for something other than JSGlobalObjects, but today is not that day.
-        RELEASE_ASSERT_NOT_REACHED();
-    }
     jsObject->setPrototypeWithCycleCheck(exec, jsValue.isObject() ? jsValue : jsNull());
 }
 
@@ -509,11 +501,6 @@ JSValueRef JSObjectGetPrivateProperty(JSContextRef ctx, JSObjectRef object, JSSt
     JSObject* jsObject = toJS(object);
     JSValue result;
     Identifier name(propertyName->identifier(&exec->vm()));
-
-    // Get wrapped object if proxied
-    if (jsObject->inherits(JSProxy::info()))
-        jsObject = jsCast<JSProxy*>(jsObject)->target();
-
     if (jsObject->inherits(JSCallbackObject<JSGlobalObject>::info()))
         result = jsCast<JSCallbackObject<JSGlobalObject>*>(jsObject)->getPrivateProperty(name);
     else if (jsObject->inherits(JSCallbackObject<JSDestructibleObject>::info()))
@@ -532,11 +519,6 @@ bool JSObjectSetPrivateProperty(JSContextRef ctx, JSObjectRef object, JSStringRe
     JSObject* jsObject = toJS(object);
     JSValue jsValue = value ? toJS(exec, value) : JSValue();
     Identifier name(propertyName->identifier(&exec->vm()));
-
-    // Get wrapped object if proxied
-    if (jsObject->inherits(JSProxy::info()))
-        jsObject = jsCast<JSProxy*>(jsObject)->target();
-
     if (jsObject->inherits(JSCallbackObject<JSGlobalObject>::info())) {
         jsCast<JSCallbackObject<JSGlobalObject>*>(jsObject)->setPrivateProperty(exec->vm(), name, jsValue);
         return true;
@@ -560,11 +542,6 @@ bool JSObjectDeletePrivateProperty(JSContextRef ctx, JSObjectRef object, JSStrin
     JSLockHolder locker(exec);
     JSObject* jsObject = toJS(object);
     Identifier name(propertyName->identifier(&exec->vm()));
-
-    // Get wrapped object if proxied
-    if (jsObject->inherits(JSProxy::info()))
-        jsObject = jsCast<JSProxy*>(jsObject)->target();
-
     if (jsObject->inherits(JSCallbackObject<JSGlobalObject>::info())) {
         jsCast<JSCallbackObject<JSGlobalObject>*>(jsObject)->deletePrivateProperty(name);
         return true;

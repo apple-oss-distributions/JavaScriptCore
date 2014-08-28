@@ -27,7 +27,5 @@
 #define CustomGlobalObjectClassTest_h
 
 void customGlobalObjectClassTest(void);
-void globalObjectSetPrototypeTest(void);
-void globalObjectPrivatePropertyTest(void);
 
 #endif // CustomGlobalObjectClassTest_h
