@@ -1,3 +1,681 @@
+2015-03-06  Lucas Forschler  <lforschler@apple.com>
+
+        Merge r180234
+
+    2015-02-17  Filip Pizlo  <fpizlo@apple.com>
+
+            Throwing from an FTL call IC slow path may result in tag registers being clobbered on 64-bit CPUs
+            https://bugs.webkit.org/show_bug.cgi?id=141717
+            rdar://problem/19863382
+
+            Reviewed by Geoffrey Garen.
+
+            The best solution is to ensure that the engine catching an exception restores tag registers.
+
+            Each of these new test cases reliably crashed prior to this patch and they don't crash at all now.
+
+            * jit/JITOpcodes.cpp:
+            (JSC::JIT::emit_op_catch):
+            * llint/LowLevelInterpreter.asm:
+            * llint/LowLevelInterpreter64.asm:
+            * tests/stress/throw-from-ftl-call-ic-slow-path-cells.js: Added.
+            * tests/stress/throw-from-ftl-call-ic-slow-path-undefined.js: Added.
+            * tests/stress/throw-from-ftl-call-ic-slow-path.js: Added.
+
+2015-03-06  Lucas Forschler  <lforschler@apple.com>
+
+        Merge r181030
+
+    2015-03-04  Filip Pizlo  <fpizlo@apple.com>
+
+            [FTL] inlined GetMyArgumentByVal with no arguments passed causes instant crash
+            https://bugs.webkit.org/show_bug.cgi?id=141180
+            rdar://problem/19677552
+
+            Reviewed by Benjamin Poulain.
+
+            If we do a GetMyArgumentByVal on an inlined call frame that has no arguments, then the
+            bounds check already terminates execution. This means we can skip the part where we
+            previously did an out-of-bound array access on the inlined call frame arguments vector.
+
+            * ftl/FTLLowerDFGToLLVM.cpp:
+            (JSC::FTL::LowerDFGToLLVM::safelyInvalidateAfterTermination):
+            (JSC::FTL::LowerDFGToLLVM::compileGetMyArgumentByVal):
+            (JSC::FTL::LowerDFGToLLVM::terminate):
+            (JSC::FTL::LowerDFGToLLVM::didAlreadyTerminate):
+            (JSC::FTL::LowerDFGToLLVM::crash):
+            * tests/stress/get-my-argument-by-val-inlined-no-formal-parameters.js: Added.
+            (foo):
+            (bar):
+
+2015-03-04  Matthew Hanson  <matthew_hanson@apple.com>
+
+        Merge r180101. rdar://problem/19913017
+
+    2015-02-13  Joseph Pecoraro  <pecoraro@apple.com>
+
+            JSContext Inspector: Do not stash console messages for non-debuggable JSContext
+            https://bugs.webkit.org/show_bug.cgi?id=141589
+
+            Reviewed by Timothy Hatcher.
+
+            Consider developer extras disabled for JSContext inspection if the
+            RemoteInspector server is not enabled (typically a non-debuggable
+            process rejected by webinspectord) or if remote debugging on the
+            JSContext was explicitly disabled via SPI.
+
+            When developer extras are disabled, console message will not be stashed.
+
+            * inspector/JSGlobalObjectInspectorController.cpp:
+            (Inspector::JSGlobalObjectInspectorController::developerExtrasEnabled):
+            * inspector/JSGlobalObjectInspectorController.h:
+
+2015-02-26  Lucas Forschler  <lforschler@apple.com>
+
+        Merge r180452
+
+    2015-02-20  Mark Lam  <mark.lam@apple.com>
+
+            [JSObjCClassInfo reallocateConstructorAndOrPrototype] should also reallocate super class prototype chain.
+            <https://webkit.org/b/141809>
+
+            Reviewed by Geoffrey Garen.
+
+            A ObjC class that implement the JSExport protocol will have a JS prototype
+            chain and constructor automatically synthesized for its JS wrapper object.
+            However, if there are no more instances of that ObjC class reachable by a
+            JS GC root scan, then its synthesized prototype chain and constructors may
+            be released by the GC.  If a new instance of that ObjC class is subsequently
+            instantiated, then [JSObjCClassInfo reallocateConstructorAndOrPrototype]
+            should re-construct the prototype chain and constructor (if they were
+            previously released).  However, the current implementation only
+            re-constructs the immediate prototype, but not every other prototype
+            object upstream in the prototype chain.
+
+            To fix this, we do the following:
+            1. We no longer allocate the JSObjCClassInfo's prototype and constructor
+               eagerly.  Hence, -initWithContext:forClass: will no longer call
+               -allocateConstructorAndPrototypeWithSuperClassInfo:.
+            2. Instead, we'll always access the prototype and constructor thru
+               accessor methods.  The accessor methods will call
+               -allocateConstructorAndPrototype: if needed.
+            3. -allocateConstructorAndPrototype: will fetch the needed superClassInfo
+               from the JSWrapperMap itself.  This makes it so that we no longer
+               need to pass the superClassInfo all over.
+            4. -allocateConstructorAndPrototype: will get the super class prototype
+               by invoking -prototype: on the superClassInfo, thereby allowing the
+               super class to allocate its prototype and constructor if needed and
+               fixing the issue in this bug.
+
+            5. Also removed the GC warning comments, and ensured that needed JS
+               objects are kept alive by having a local var pointing to it from the
+               stack (which makes a GC root).
+
+            * API/JSWrapperMap.mm:
+            (-[JSObjCClassInfo initWithContext:forClass:]):
+            (-[JSObjCClassInfo allocateConstructorAndPrototype]):
+            (-[JSObjCClassInfo wrapperForObject:]):
+            (-[JSObjCClassInfo constructor]):
+            (-[JSObjCClassInfo prototype]):
+            (-[JSWrapperMap classInfoForClass:]):
+            (-[JSObjCClassInfo initWithContext:forClass:superClassInfo:]): Deleted.
+            (-[JSObjCClassInfo allocateConstructorAndPrototypeWithSuperClassInfo:]): Deleted.
+            (-[JSObjCClassInfo reallocateConstructorAndOrPrototype]): Deleted.
+            * API/tests/Regress141809.h: Added.
+            * API/tests/Regress141809.mm: Added.
+            (-[TestClassB name]):
+            (-[TestClassC name]):
+            (runRegress141809):
+            * API/tests/testapi.mm:
+            * JavaScriptCore.xcodeproj/project.pbxproj:
+
+2015-02-25  Babak Shafiei  <bshafiei@apple.com>
+
+        Merge patch for r180247 and r180249.
+
+    2015-02-20  Michael Saboff  <msaboff@apple.com>
+
+            CrashTracer: DFG_CRASH beneath JSC::FTL::LowerDFGToLLVM::compileNode
+            https://bugs.webkit.org/show_bug.cgi?id=141730
+
+            Reviewed by Geoffrey Garen.
+
+            Added a new failure handler, loweringFailed(), to LowerDFGToLLVM that reports failures
+            while processing DFG lowering.  For debug builds, the failures are logged identical
+            to the way the DFG_CRASH() reports them.  For release builds, the failures are reported
+            and that FTL compilation is terminated, but the process is allowed to continue.
+            Wrapped calls to loweringFailed() in a macro LOWERING_FAILED so the function and
+            line number are reported at the point of the inconsistancy.
+
+            Converted instances of DFG_CRASH to LOWERING_FAILED.
+
+            * dfg/DFGPlan.cpp:
+            (JSC::DFG::Plan::compileInThreadImpl): Added lowerDFGToLLVM() failure check that
+            will fail the FTL compile.
+
+            * ftl/FTLLowerDFGToLLVM.cpp:
+            (JSC::FTL::LowerDFGToLLVM::LowerDFGToLLVM):
+            Added new member variable, m_loweringSucceeded, to stop compilation on the first
+            reported failure.
+
+            * ftl/FTLLowerDFGToLLVM.cpp:
+            (JSC::FTL::LowerDFGToLLVM::lower):
+            * ftl/FTLLowerDFGToLLVM.h:
+            Added check for compilation failures and now report those failures via a boolean
+            return value.
+
+            * ftl/FTLLowerDFGToLLVM.cpp:
+            (JSC::FTL::LowerDFGToLLVM::createPhiVariables):
+            (JSC::FTL::LowerDFGToLLVM::compileNode):
+            (JSC::FTL::LowerDFGToLLVM::compileUpsilon):
+            (JSC::FTL::LowerDFGToLLVM::compilePhi):
+            (JSC::FTL::LowerDFGToLLVM::compileDoubleRep):
+            (JSC::FTL::LowerDFGToLLVM::compileValueRep):
+            (JSC::FTL::LowerDFGToLLVM::compileValueToInt32):
+            (JSC::FTL::LowerDFGToLLVM::compilePutLocal):
+            (JSC::FTL::LowerDFGToLLVM::compileArithAddOrSub):
+            (JSC::FTL::LowerDFGToLLVM::compileArithMul):
+            (JSC::FTL::LowerDFGToLLVM::compileArithDiv):
+            (JSC::FTL::LowerDFGToLLVM::compileArithMod):
+            (JSC::FTL::LowerDFGToLLVM::compileArithMinOrMax):
+            (JSC::FTL::LowerDFGToLLVM::compileArithAbs):
+            (JSC::FTL::LowerDFGToLLVM::compileArithNegate):
+            (JSC::FTL::LowerDFGToLLVM::compileArrayifyToStructure):
+            (JSC::FTL::LowerDFGToLLVM::compileGetById):
+            (JSC::FTL::LowerDFGToLLVM::compileGetMyArgumentByVal):
+            (JSC::FTL::LowerDFGToLLVM::compileGetArrayLength):
+            (JSC::FTL::LowerDFGToLLVM::compileGetByVal):
+            (JSC::FTL::LowerDFGToLLVM::compilePutByVal):
+            (JSC::FTL::LowerDFGToLLVM::compileArrayPush):
+            (JSC::FTL::LowerDFGToLLVM::compileArrayPop):
+            (JSC::FTL::LowerDFGToLLVM::compileNewArray):
+            (JSC::FTL::LowerDFGToLLVM::compileToString):
+            (JSC::FTL::LowerDFGToLLVM::compileMakeRope):
+            (JSC::FTL::LowerDFGToLLVM::compileCompareEq):
+            (JSC::FTL::LowerDFGToLLVM::compileCompareStrictEq):
+            (JSC::FTL::LowerDFGToLLVM::compileSwitch):
+            (JSC::FTL::LowerDFGToLLVM::compare):
+            (JSC::FTL::LowerDFGToLLVM::boolify):
+            (JSC::FTL::LowerDFGToLLVM::opposite):
+            (JSC::FTL::LowerDFGToLLVM::lowJSValue):
+            (JSC::FTL::LowerDFGToLLVM::speculate):
+            (JSC::FTL::LowerDFGToLLVM::isArrayType):
+            (JSC::FTL::LowerDFGToLLVM::exitValueForAvailability):
+            (JSC::FTL::LowerDFGToLLVM::exitValueForNode):
+            (JSC::FTL::LowerDFGToLLVM::setInt52):
+            Changed DFG_CRASH() to LOWERING_FAILED().  Updated related control flow as appropriate.
+
+            (JSC::FTL::LowerDFGToLLVM::loweringFailed): New error reporting member function.
+
+2015-02-25  Babak Shafiei  <bshafiei@apple.com>
+
+        Merge r180516.
+
+    2015-02-23  Matthew Mirman  <mmirman@apple.com>
+
+            r9 is volatile on ARMv7 for iOS 3 and up. 
+            https://bugs.webkit.org/show_bug.cgi?id=141489
+            rdar://problem/19432916
+
+            Reviewed by Michael Saboff.
+
+            * jit/RegisterSet.cpp: 
+            (JSC::RegisterSet::calleeSaveRegisters): removed r9 from the list of ARMv7 callee save registers.
+            * tests/stress/regress-141489.js: Added.
+            (foo):
+
+2015-02-20  Lucas Forschler  <lforschler@apple.com>
+
+        Merge r180237
+
+    2015-02-17  Filip Pizlo  <fpizlo@apple.com>
+
+            StackLayoutPhase should use CodeBlock::usesArguments rather than FunctionExecutable::usesArguments
+            https://bugs.webkit.org/show_bug.cgi?id=141721
+            rdar://problem/17198633
+
+            Reviewed by Michael Saboff.
+
+            I've seen cases where the two are out of sync.  We know we can trust the CodeBlock::usesArguments because
+            we use it everywhere else.
+
+            No test because I could never reproduce the crash.
+
+            * dfg/DFGGraph.h:
+            (JSC::DFG::Graph::usesArguments):
+            * dfg/DFGStackLayoutPhase.cpp:
+            (JSC::DFG::StackLayoutPhase::run):
+
+2015-02-20  Babak Shafiei  <bshafiei@apple.com>
+
+        Merge r178224.
+
+    2015-01-09  Joseph Pecoraro  <pecoraro@apple.com>
+
+            Web Inspector: Uncaught Exception in ProbeManager deleting breakpoint
+            https://bugs.webkit.org/show_bug.cgi?id=140279
+            rdar://problem/19422299
+
+            Reviewed by Oliver Hunt.
+
+            * runtime/MapData.cpp:
+            (JSC::MapData::replaceAndPackBackingStore):
+            The cell table also needs to have its values fixed.
+
+2015-02-20  Babak Shafiei  <bshafiei@apple.com>
+
+        Merge patch for rdar://problem/19828630.
+
+    2015-02-13  Filip Pizlo  <fpizlo@apple.com>
+
+            Effectful calls to length should only happen once on the varargs path.
+            rdar://problem/19828518
+
+            Reviewed by Michael Saboff.
+
+            * interpreter/Interpreter.cpp:
+            (JSC::sizeFrameForVarargs):
+            (JSC::loadVarargs):
+            * runtime/VM.cpp:
+            (JSC::VM::VM):
+            * runtime/VM.h:
+
+2015-02-10  Babak Shafiei  <bshafiei@apple.com>
+
+        Merge r179576, r179648.
+
+    2015-02-04  Mark Lam  <mark.lam@apple.com>
+
+            r179576 introduce a deadlock potential during GC thread suspension.
+            <https://webkit.org/b/141268>
+
+            Reviewed by Michael Saboff.
+
+            http://trac.webkit.org/r179576 introduced a potential for deadlocking.
+            In the GC thread suspension loop, we currently delete
+            MachineThreads::Thread that we detect to be invalid.  This is unsafe
+            because we may have already suspended some threads, and one of those
+            suspended threads may still be holding the C heap lock which we need
+            for deleting the invalid thread.
+
+            The fix is to put the invalid threads in a separate toBeDeleted list,
+            and delete them only after GC has resumed all threads.
+
+            * heap/MachineStackMarker.cpp:
+            (JSC::MachineThreads::removeCurrentThread):
+            - Undo refactoring removeThreadWithLockAlreadyAcquired() out of
+            removeCurrentThread() since it is no longer needed.
+
+            (JSC::MachineThreads::tryCopyOtherThreadStacks):
+            - Put invalid Threads on a threadsToBeDeleted list, and delete those
+            Threads only after all threads have been resumed.
+
+            (JSC::MachineThreads::removeThreadWithLockAlreadyAcquired): Deleted.
+            * heap/MachineStackMarker.h:
+
+    2015-02-03  Mark Lam  <mark.lam@apple.com>
+
+            Workaround a thread library bug where thread destructors may not get called.
+            <https://webkit.org/b/141209>
+
+            Reviewed by Michael Saboff.
+
+            There's a bug where thread destructors may not get called.  As far as
+            we know, this only manifests on darwin ports.  We will work around this
+            by checking at GC time if the platform thread is still valid.  If not,
+            we'll purge it from the VM's registeredThreads list before proceeding
+            with thread scanning activity.
+
+            Note: it is important that we do this invalid thread detection during
+            suspension, because the validity (and liveness) of the other thread is
+            only guaranteed while it is suspended.
+
+            * API/tests/testapi.mm:
+            (threadMain):
+            - Added a test to enter the VM from another thread before we GC on
+              the main thread.
+
+            * heap/MachineStackMarker.cpp:
+            (JSC::MachineThreads::removeThreadWithLockAlreadyAcquired):
+            (JSC::MachineThreads::removeCurrentThread):
+            - refactored removeThreadWithLockAlreadyAcquired() out from
+              removeCurrentThread() so that we can also call it for purging invalid
+              threads.
+            (JSC::suspendThread):
+            - Added a return status to tell if the suspension succeeded or not.
+            (JSC::MachineThreads::tryCopyOtherThreadStacks):
+            - Check if the suspension failed, and purge the thread if we can't
+              suspend it.  Failure to suspend implies that the thread has
+              terminated without calling its destructor.
+            * heap/MachineStackMarker.h:
+
+2015-02-10  Babak Shafiei  <bshafiei@apple.com>
+
+        Merge r179187.
+
+    2015-01-27  Csaba Osztrogonác  <ossy@webkit.org>
+
+            [ARM] Typo fix after r176083
+            https://bugs.webkit.org/show_bug.cgi?id=140937
+
+            Reviewed by Anders Carlsson.
+
+            * assembler/ARMv7Assembler.h:
+            (JSC::ARMv7Assembler::ldrh):
+
+2015-02-10  Babak Shafiei  <bshafiei@apple.com>
+
+        Merge r176083.
+
+    2014-11-13  Benjamin Poulain  <benjamin@webkit.org>
+
+            ARMv7(s) Assembler: LDRH with immediate offset is loading from the wrong offset
+            https://bugs.webkit.org/show_bug.cgi?id=136914
+
+            Reviewed by Michael Saboff.
+
+            TLDR: the immediate offset of half-word load was divided by 2.
+
+            Story time: So I started getting those weird reports of :nth-child() behaving bizarrely
+            on ARMv7 and ARMv7s. To make things worse, the behavior changes depending on style updates.
+
+            I started looking the disassembly on the tests cases...
+
+            The first thing I noticed was that the computation of An+B looked wrong. For example,
+            in the case of n+6, the instruction should have been:
+                subs r1, r1, #6
+            but was
+                subs r1, r1, #2
+
+            After spending a lot of time trying to find the error in the assembler, I discovered
+            the problem was not real, but just a bug in the disassembler.
+            This is the first fix: ARMv7DOpcodeAddSubtractImmediate3's immediate3() was truncating
+            the value to 2 bits instead of 3 bits.
+
+            The disassembler being fixed, I still have no lead on the weird bug. Some disassembly later,
+            I realize the LDRH instruction is not decoded at all. The reason is that both LDRH and STRH
+            were under the umbrella ARMv7DOpcodeLoadStoreRegisterImmediateHalfWord but the pattern
+            only matched SRTH.
+
+            I fix that next, ARMv7DOpcodeLoadStoreRegisterImmediateHalfWord is split into
+            ARMv7DOpcodeStoreRegisterImmediateHalfWord and ARMv7DOpcodeLoadRegisterImmediateHalfWord,
+            each with their own pattern and their instruction group.
+
+            Now that I can see the LDRHs correctly, there is something fishy about them, their offset
+            is way too small for the data I load.
+
+            This time, looking at the binary, the generated code is indeed incorrect. It turns out that
+            the ARMv7 assembler shifted the offset of half-word load as if they were byte load: divided by 4.
+            As a result, all the load of half-words with more than zero offset were loading
+            values with a smaller offset than what they should have.
+
+            That being fixed, I dump the assembly: still wrong. I am ready to throw my keyboard through
+            my screen at that point.
+
+            Looking at the disassembler, there is yet again a bug. The computation of the scale() adjustment
+            of the offset was incorrect for anything but word loads.
+            I replaced it by a switch-case to make it explicit.
+
+            STRH is likely incorrect too. I'll fix that in a follow up, I want to survey all the 16 bits cases
+            that are not directly used by the CSS JIT.
+
+            * assembler/ARMv7Assembler.h:
+            (JSC::ARMv7Assembler::ldrh):
+            Fix the immediate scaling. Add an assertion to make sure the alignment of the input is correct.
+
+            * disassembler/ARMv7/ARMv7DOpcode.cpp:
+            (JSC::ARMv7Disassembler::ARMv7DOpcodeLoadStoreRegisterImmediate::scale):
+            Fix the scaling code. Just hardcode instruction-to-scale table.
+
+            * disassembler/ARMv7/ARMv7DOpcode.h:
+            (JSC::ARMv7Disassembler::ARMv7DOpcodeAddSubtractImmediate3::immediate3):
+            The mask for a 3 bits immediate is not 3 :)
+
+            (JSC::ARMv7Disassembler::ARMv7DOpcodeLoadStoreRegisterImmediate::scale): Deleted.
+
+2015-02-05  Lucas Forschler  <lforschler@apple.com>
+
+        Merge r178953
+
+    2015-01-21  Joseph Pecoraro  <pecoraro@apple.com>
+
+            Web Inspector: ASSERT expanding objects in console PrimitiveBindingTraits<T>::assertValueHasExpectedType
+            https://bugs.webkit.org/show_bug.cgi?id=140746
+
+            Reviewed by Timothy Hatcher.
+
+            * inspector/InjectedScriptSource.js:
+            Do not add impure properties to the descriptor object that will
+            eventually be sent to the frontend.
+
+2015-02-05  Lucas Forschler  <lforschler@apple.com>
+
+        Merge r178768
+
+    2015-01-20  Joseph Pecoraro  <pecoraro@apple.com>
+
+            Web Inspector: Expanding event objects in console shows undefined for most values, it should have real values
+            https://bugs.webkit.org/show_bug.cgi?id=137306
+
+            Reviewed by Timothy Hatcher.
+
+            Provide another optional parameter to getProperties, to gather a list
+            of all own and getter properties.
+
+            * inspector/InjectedScript.cpp:
+            (Inspector::InjectedScript::getProperties):
+            * inspector/InjectedScript.h:
+            * inspector/InjectedScriptSource.js:
+            * inspector/agents/InspectorRuntimeAgent.cpp:
+            (Inspector::InspectorRuntimeAgent::getProperties):
+            * inspector/agents/InspectorRuntimeAgent.h:
+            * inspector/protocol/Runtime.json:
+
+2015-02-04  Lucas Forschler  <lforschler@apple.com>
+
+        Merge r179329
+
+    2015-01-13  Geoffrey Garen  <ggaren@apple.com>
+
+            Out of bounds access in BytecodeGenerator::emitGetById under DotAccessorNode::emitBytecode
+            https://bugs.webkit.org/show_bug.cgi?id=140397
+
+            Reviewed by Geoffrey Garen.
+
+            Patch by Alexey Proskuryakov.
+
+            Reviewed, performance tested, and ChangeLogged by Geoffrey Garen.
+
+            No performance change.
+
+            No test, since this is a small past-the-end read, which is very
+            difficult to turn into a reproducible failing test -- and existing tests
+            crash reliably using ASan.
+
+            * bytecompiler/NodesCodegen.cpp:
+            (JSC::BracketAccessorNode::emitBytecode):
+            (JSC::DotAccessorNode::emitBytecode):
+            (JSC::FunctionCallBracketNode::emitBytecode):
+            (JSC::PostfixNode::emitResolve):
+            (JSC::DeleteBracketNode::emitBytecode):
+            (JSC::DeleteDotNode::emitBytecode):
+            (JSC::PrefixNode::emitResolve):
+            (JSC::UnaryOpNode::emitBytecode):
+            (JSC::BitwiseNotNode::emitBytecode):
+            (JSC::BinaryOpNode::emitBytecode):
+            (JSC::EqualNode::emitBytecode):
+            (JSC::StrictEqualNode::emitBytecode):
+            (JSC::ThrowableBinaryOpNode::emitBytecode):
+            (JSC::AssignDotNode::emitBytecode):
+            (JSC::AssignBracketNode::emitBytecode): Use RefPtr in more places. Any
+            register used across a call to a function that might allocate a new
+            temporary register must be held in a RefPtr.
+
+2015-02-04  Lucas Forschler  <lforschler@apple.com>
+
+        Merge r178311
+
+    2015-01-12  Geoffrey Garen  <ggaren@apple.com>
+
+            Out of bounds read in IdentifierArena::makeIdentifier
+            https://bugs.webkit.org/show_bug.cgi?id=140376
+
+            Patch by Alexey Proskuryakov.
+
+            Reviewed and ChangeLogged by Geoffrey Garen.
+
+            No test, since this is a small past-the-end read, which is very
+            difficult to turn into a reproducible failing test -- and existing tests
+            crash reliably using ASan.
+
+            * parser/ParserArena.h:
+            (JSC::IdentifierArena::makeIdentifier):
+            (JSC::IdentifierArena::makeIdentifierLCharFromUChar): Check for a
+            zero-length string input, like we do in the literal parser, since it is
+            not valid to dereference characters in a zero-length string.
+
+            A zero-length string is allowed in JavaScript -- for example, "".
+
+2015-01-28  Lucas Forschler  <lforschler@apple.com>
+
+        Merge r178364
+
+    2015-01-12  Michael Saboff  <msaboff@apple.com>
+
+            Local JSArray* "keys" in objectConstructorKeys() is not marked during garbage collection
+            https://bugs.webkit.org/show_bug.cgi?id=140348
+
+            Reviewed by Mark Lam.
+
+            We used to read registers in MachineThreads::gatherFromCurrentThread(), but that is too late
+            because those registers may have been spilled on the stack and replaced with other values by
+            the time we call down to gatherFromCurrentThread().
+
+            Now we get the register contents at the same place that we demarcate the current top of
+            stack using the address of a local variable, in Heap::markRoots().  The register contents
+            buffer is passed along with the demarcation pointer.  These need to be done at this level 
+            in the call tree and no lower, as markRoots() calls various functions that visit object
+            pointers that may be latter proven dead.  Any of those pointers that are left on the
+            stack or in registers could be incorrectly marked as live if we scan the stack contents
+            from a called function or one of its callees.  The stack demarcation pointer and register
+            saving need to be done in the same function so that we have a consistent stack, active
+            and spilled registers.
+
+            Because we don't want to make unnecessary calls to get the register contents, we use
+            a macro to allocated, and possibly align, the register structure and get the actual
+            register contents.
+
+
+            * heap/Heap.cpp:
+            (JSC::Heap::markRoots):
+            (JSC::Heap::gatherStackRoots):
+            * heap/Heap.h:
+            * heap/MachineStackMarker.cpp:
+            (JSC::MachineThreads::gatherFromCurrentThread):
+            (JSC::MachineThreads::gatherConservativeRoots):
+            * heap/MachineStackMarker.h:
+
+2015-01-27  Lucas Forschler  <lforschler@apple.com>
+
+        Merge r177455
+
+    2014-12-17  Chris Dumez  <cdumez@apple.com>
+
+            [iOS] Make it possible to toggle FeatureCounter support at runtime
+            https://bugs.webkit.org/show_bug.cgi?id=139688
+            <rdar://problem/19266254>
+
+            Reviewed by Andreas Kling.
+
+            Stop linking against AppSupport framework as the functionality is no
+            longer in WTF (it was moved to WebCore).
+
+            * Configurations/JavaScriptCore.xcconfig:
+
+2015-01-26  Lucas Forschler  <lforschler@apple.com>
+
+        Merge r177328
+
+    2014-12-15  Chris Dumez  <cdumez@apple.com>
+
+            [iOS] Add feature counting support
+            https://bugs.webkit.org/show_bug.cgi?id=139652
+            <rdar://problem/19255690>
+
+            Reviewed by Gavin Barraclough.
+
+            Link against AppSupport framework on iOS as we need it to implement
+            the new FeatureCounter API in WTF.
+
+            * Configurations/JavaScriptCore.xcconfig:
+
+2015-01-21  Babak Shafiei  <bshafiei@apple.com>
+
+        Merge r176972.
+
+    2014-12-08  Mark Lam  <mark.lam@apple.com>
+
+            CFA wrongly assumes that a speculation for SlowPutArrayStorageShape disallows ArrayStorageShape arrays.
+            <https://webkit.org/b/139327>
+
+            Reviewed by Michael Saboff.
+
+            The code generator and runtime slow paths expects otherwise.  This patch fixes
+            CFA to match the code generator's expectation.
+
+            * dfg/DFGArrayMode.h:
+            (JSC::DFG::ArrayMode::arrayModesThatPassFiltering):
+            (JSC::DFG::ArrayMode::arrayModesWithIndexingShapes):
+
+2015-01-20  Babak Shafiei  <bshafiei@apple.com>
+
+        Merge r171691.
+
+    2014-07-28  Mark Hahnenberg  <mhahnenberg@apple.com>
+
+            REGRESSION: JSObjectSetPrototype() does not work on result of JSGetGlobalObject()
+            https://bugs.webkit.org/show_bug.cgi?id=135322
+
+            Reviewed by Oliver Hunt.
+
+            The prototype chain of the JSProxy object should match that of the JSGlobalObject. 
+
+            This is a separate but related issue with JSObjectSetPrototype which doesn't correctly 
+            account for JSProxies. I also audited the rest of the C API to check that we correctly 
+            handle JSProxies in all other situations where we expect a JSCallbackObject of some sort
+            and found some SPI calls (JSObject*PrivateProperty) that didn't behave correctly when 
+            passed a JSProxy.
+
+            I also added some new tests for these cases.
+
+            * API/JSObjectRef.cpp:
+            (JSObjectSetPrototype):
+            (JSObjectGetPrivateProperty):
+            (JSObjectSetPrivateProperty):
+            (JSObjectDeletePrivateProperty):
+            * API/JSWeakObjectMapRefPrivate.cpp:
+            * API/tests/CustomGlobalObjectClassTest.c:
+            (globalObjectSetPrototypeTest):
+            (globalObjectPrivatePropertyTest):
+            * API/tests/CustomGlobalObjectClassTest.h:
+            * API/tests/testapi.c:
+            (main):
+
+2015-01-11  Mark Lam  <mark.lam@apple.com>
+
+        Update WebKit branch to build with newer LLVM.
+        <https://webkit.org/b/140341>
+
+        Reviewed by Filip Pizlo.
+
+        * Configurations/LLVMForJSC.xcconfig:
+        - Add the ability to pick up LLVM_LIBS_iphoneos from AspenLLVM.xcconfig.
+        * llvm/LLVMAPIFunctions.h:
+        - Removed some erroneous and unused APIs.
+        * llvm/library/LLVMExports.cpp:
+        (initializeAndGetJSCLLVMAPI):
+        - Removed an unneeded option that is also not supported by the new LLVM.
+
 2014-12-10  Babak Shafiei  <bshafiei@apple.com>
 
         Merge r176803.
