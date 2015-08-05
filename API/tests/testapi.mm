@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013 Apple Inc. All rights reserved.
+ * Copyright (C) 2013-2015 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -28,6 +28,10 @@
 #import "CurrentThisInsideBlockGetterTest.h"
 #import "DateTests.h"
 #import "JSExportTests.h"
+#import "Regress141275.h"
+#import "Regress141809.h"
+
+#import <pthread.h>
 
 extern "C" void JSSynchronousGarbageCollectForDebugging(JSContextRef);
 extern "C" void JSSynchronousEdenCollectForDebugging(JSContextRef);
@@ -470,10 +474,45 @@ static bool blockSignatureContainsClass()
     return containsClass;
 }
 
-void testObjectiveCAPI()
+static void* threadMain(void* contextPtr)
 {
-    NSLog(@"Testing Objective-C API");
+    JSContext *context = (__bridge JSContext*)contextPtr;
 
+    // Do something to enter the VM.
+    TestObject *testObject = [TestObject testObject];
+    context[@"testObject"] = testObject;
+    pthread_exit(nullptr);
+}
+
+// This test is flaky. Since GC marks C stack and registers as roots conservatively,
+// objects not referenced logically can be accidentally marked and alive.
+// To avoid this situation as possible as we can,
+// 1. run this test first before stack is polluted,
+// 2. extract this test as a function to suppress stack height.
+static void testWeakValue()
+{
+    @autoreleasepool {
+        JSVirtualMachine *vm = [[JSVirtualMachine alloc] init];
+        TestObject *testObject = [TestObject testObject];
+        JSManagedValue *weakValue;
+        @autoreleasepool {
+            JSContext *context = [[JSContext alloc] initWithVirtualMachine:vm];
+            context[@"testObject"] = testObject;
+            weakValue = [[JSManagedValue alloc] initWithValue:context[@"testObject"]];
+        }
+
+        @autoreleasepool {
+            JSContext *context = [[JSContext alloc] initWithVirtualMachine:vm];
+            context[@"testObject"] = testObject;
+            JSSynchronousGarbageCollectForDebugging([context JSGlobalContextRef]);
+            checkResult(@"weak value == nil", ![weakValue value]);
+            checkResult(@"root is still alive", !context[@"testObject"].isUndefined);
+        }
+    }
+}
+
+static void testObjectiveCAPIMain()
+{
     @autoreleasepool {
         JSVirtualMachine* vm = [[JSVirtualMachine alloc] init];
         JSContext* context = [[JSContext alloc] initWithVirtualMachine:vm];
@@ -483,7 +522,7 @@ void testObjectiveCAPI()
     @autoreleasepool {
         JSContext *context = [[JSContext alloc] init];
         JSValue *result = [context evaluateScript:@"2 + 2"];
-        checkResult(@"2 + 2", [result isNumber] && [result toInt32] == 4);
+        checkResult(@"2 + 2", result.isNumber && [result toInt32] == 4);
     }
 
     @autoreleasepool {
@@ -496,17 +535,36 @@ void testObjectiveCAPI()
         JSContext *context = [[JSContext alloc] init];
         context[@"message"] = @"Hello";
         JSValue *result = [context evaluateScript:@"message + ', World!'"];
-        checkResult(@"Hello, World!", [result isString] && [result isEqualToObject:@"Hello, World!"]);
+        checkResult(@"Hello, World!", result.isString && [result isEqualToObject:@"Hello, World!"]);
+    }
+
+    @autoreleasepool {
+        JSContext *context = [[JSContext alloc] init];
+        checkResult(@"Promise is not exposed", [context[@"Promise"] isUndefined]);
+        JSValue *result = [context evaluateScript:@"typeof Promise"];
+        checkResult(@"typeof Promise is 'undefined'", result.isString && [result isEqualToObject:@"undefined"]);
     }
 
     @autoreleasepool {
         JSContext *context = [[JSContext alloc] init];
         JSValue *result = [context evaluateScript:@"({ x:42 })"];
-        checkResult(@"({ x:42 })", [result isObject] && [result[@"x"] isEqualToObject:@42]);
+        checkResult(@"({ x:42 })", result.isObject && [result[@"x"] isEqualToObject:@42]);
         id obj = [result toObject];
         checkResult(@"Check dictionary literal", [obj isKindOfClass:[NSDictionary class]]);
         id num = (NSDictionary *)obj[@"x"];
         checkResult(@"Check numeric literal", [num isKindOfClass:[NSNumber class]]);
+    }
+
+    @autoreleasepool {
+        JSContext *context = [[JSContext alloc] init];
+        JSValue *result = [context evaluateScript:@"[ ]"];
+        checkResult(@"[ ]", result.isArray);
+    }
+
+    @autoreleasepool {
+        JSContext *context = [[JSContext alloc] init];
+        JSValue *result = [context evaluateScript:@"new Date"];
+        checkResult(@"new Date", result.isDate);
     }
 
     @autoreleasepool {
@@ -530,11 +588,11 @@ void testObjectiveCAPI()
             JSValue *myNumber = [myPrivateProperties valueForKey:@"my_number"];
             JSValue *definitelyNull = [myPrivateProperties valueForKey:@"definitely_null"];
             JSValue *notSureIfUndefined = [myPrivateProperties valueForKey:@"not_sure_if_undefined"];
-            checkResult(@"is_ham is true", [isHam isBoolean] && [isHam toBool]);
-            checkResult(@"message is hello!", [message isString] && [@"hello!" isEqualToString:[message toString]]);
-            checkResult(@"my_number is 42", [myNumber isNumber] && [myNumber toInt32] == 42);
-            checkResult(@"definitely_null is null", [definitelyNull isNull]);
-            checkResult(@"not_sure_if_undefined is undefined", [notSureIfUndefined isUndefined]);
+            checkResult(@"is_ham is true", isHam.isBoolean && [isHam toBool]);
+            checkResult(@"message is hello!", message.isString && [@"hello!" isEqualToString:[message toString]]);
+            checkResult(@"my_number is 42", myNumber.isNumber && [myNumber toInt32] == 42);
+            checkResult(@"definitely_null is null", definitelyNull.isNull);
+            checkResult(@"not_sure_if_undefined is undefined", notSureIfUndefined.isUndefined);
         }
 
         checkResult(@"is_ham is nil", ![myPrivateProperties valueForKey:@"is_ham"]);
@@ -620,7 +678,7 @@ void testObjectiveCAPI()
         JSContext *context = [[JSContext alloc] init];
         __block bool emptyExceptionSourceURL = false;
         context.exceptionHandler = ^(JSContext *, JSValue *exception) {
-            emptyExceptionSourceURL = [exception[@"sourceURL"] isUndefined];
+            emptyExceptionSourceURL = exception[@"sourceURL"].isUndefined;
         };
         [context evaluateScript:@"!@#$%^&*() THIS IS NOT VALID JAVASCRIPT SYNTAX !@#$%^&*()"];
         checkResult(@"evaluteScript: exception has no sourceURL", emptyExceptionSourceURL);
@@ -681,7 +739,7 @@ void testObjectiveCAPI()
                 return result; \
             })"];
         JSValue *result = [mulAddFunction callWithArguments:@[ @[ @2, @4, @8 ], @{ @"x":@0.5, @"y":@42 } ]];
-        checkResult(@"mulAddFunction", [result isObject] && [[result toString] isEqual:@"43,44,46"]);
+        checkResult(@"mulAddFunction", result.isObject && [[result toString] isEqual:@"43,44,46"]);
     }
 
     @autoreleasepool {
@@ -706,7 +764,7 @@ void testObjectiveCAPI()
         checkResult(@"array.length after put to maxLength + 1", [[array[@"length"] toNumber] unsignedIntegerValue] == maxLength);
 
         if (sizeof(NSUInteger) == 8)
-            checkResult(@"valueAtIndex:0 is undefined", [[array valueAtIndex:0] isUndefined]);
+            checkResult(@"valueAtIndex:0 is undefined", [array valueAtIndex:0].isUndefined);
         else
             checkResult(@"valueAtIndex:0", [[array valueAtIndex:0] toInt32] == 24);
         checkResult(@"valueAtIndex:lowIndex", [[array valueAtIndex:lowIndex] toInt32] == 42);
@@ -830,7 +888,7 @@ void testObjectiveCAPI()
         context[@"testObjectA"] = testObject;
         context[@"testObjectB"] = testObject;
         JSValue *result = [context evaluateScript:@"testObjectA == testObjectB"];
-        checkResult(@"testObjectA == testObjectB", [result isBoolean] && [result toBool]);
+        checkResult(@"testObjectA == testObjectB", result.isBoolean && [result toBool]);
     }
 
     @autoreleasepool {
@@ -850,7 +908,7 @@ void testObjectiveCAPI()
         context[@"testObject"] = testObject;
         context[@"mul"] = ^(int x, int y){ return x * y; };
         JSValue *result = [context evaluateScript:@"mul(testObject.six, 7)"];
-        checkResult(@"mul(testObject.six, 7)", [result isNumber] && [result toInt32] == 42);
+        checkResult(@"mul(testObject.six, 7)", result.isNumber && [result toInt32] == 42);
     }
 
     @autoreleasepool {
@@ -881,7 +939,7 @@ void testObjectiveCAPI()
         TestObject* testObject = [TestObject testObject];
         context[@"testObject"] = testObject;
         JSValue *result = [context evaluateScript:@"testObject.getString()"];
-        checkResult(@"testObject.getString()", [result isString] && [result toInt32] == 42);
+        checkResult(@"testObject.getString()", result.isString && [result toInt32] == 42);
     }
 
     @autoreleasepool {
@@ -897,7 +955,7 @@ void testObjectiveCAPI()
         TestObject* testObject = [TestObject testObject];
         context[@"testObject"] = testObject;
         JSValue *result = [context evaluateScript:@"testObject.getString.call(testObject)"];
-        checkResult(@"testObject.getString.call(testObject)", [result isString] && [result toInt32] == 42);
+        checkResult(@"testObject.getString.call(testObject)", result.isString && [result toInt32] == 42);
     }
 
     @autoreleasepool {
@@ -914,9 +972,9 @@ void testObjectiveCAPI()
         TestObject* testObject = [TestObject testObject];
         context[@"testObject"] = testObject;
         JSValue *result = [context evaluateScript:@"var result = 0; testObject.callback(function(x){ result = x; }); result"];
-        checkResult(@"testObject.callback", [result isNumber] && [result toInt32] == 42);
+        checkResult(@"testObject.callback", result.isNumber && [result toInt32] == 42);
         result = [context evaluateScript:@"testObject.bogusCallback"];
-        checkResult(@"testObject.bogusCallback == undefined", [result isUndefined]);
+        checkResult(@"testObject.bogusCallback == undefined", result.isUndefined);
     }
 
     @autoreleasepool {
@@ -924,7 +982,7 @@ void testObjectiveCAPI()
         TestObject *testObject = [TestObject testObject];
         context[@"testObject"] = testObject;
         JSValue *result = [context evaluateScript:@"Function.prototype.toString.call(testObject.callback)"];
-        checkResult(@"Function.prototype.toString", !context.exception && ![result isUndefined]);
+        checkResult(@"Function.prototype.toString", !context.exception && !result.isUndefined);
     }
 
     @autoreleasepool {
@@ -1005,13 +1063,13 @@ void testObjectiveCAPI()
 
         @autoreleasepool {
             JSValue *result = [context evaluateScript:@"testXYZ.onclick"];
-            checkResult(@"onclick still around after GC", !([result isNull] || [result isUndefined]));
+            checkResult(@"onclick still around after GC", !(result.isNull || result.isUndefined));
         }
 
 
         @autoreleasepool {
             JSValue *result = [context evaluateScript:@"testXYZ.weakOnclick"];
-            checkResult(@"weakOnclick not around after GC", [result isNull] || [result isUndefined]);
+            checkResult(@"weakOnclick not around after GC", result.isNull || result.isUndefined);
         }
 
         @autoreleasepool {
@@ -1027,25 +1085,6 @@ void testObjectiveCAPI()
             [testXYZ click];
             JSValue *result = [context evaluateScript:@"didClick"];
             checkResult(@"Event handler onclick doesn't fire", ![result toBool]);
-        }
-    }
-
-    @autoreleasepool {
-        JSVirtualMachine *vm = [[JSVirtualMachine alloc] init];
-        TestObject *testObject = [TestObject testObject];
-        JSManagedValue *weakValue;
-        @autoreleasepool {
-            JSContext *context = [[JSContext alloc] initWithVirtualMachine:vm];
-            context[@"testObject"] = testObject;
-            weakValue = [[JSManagedValue alloc] initWithValue:context[@"testObject"]];
-        }
-
-        @autoreleasepool {
-            JSContext *context = [[JSContext alloc] initWithVirtualMachine:vm];
-            context[@"testObject"] = testObject;
-            JSSynchronousGarbageCollectForDebugging([context JSGlobalContextRef]);
-            checkResult(@"weak value == nil", ![weakValue value]);
-            checkResult(@"root is still alive", ![context[@"testObject"] isUndefined]);
         }
     }
 
@@ -1075,7 +1114,7 @@ void testObjectiveCAPI()
         JSSynchronousGarbageCollectForDebugging([context JSGlobalContextRef]);
 
         JSValue *myCustomProperty = [context evaluateScript:@"getLastNodeInChain(root).myCustomProperty"];
-        checkResult(@"My custom property == 42", [myCustomProperty isNumber] && [myCustomProperty toInt32] == 42);
+        checkResult(@"My custom property == 42", myCustomProperty.isNumber && [myCustomProperty toInt32] == 42);
     }
 
     @autoreleasepool {
@@ -1107,7 +1146,7 @@ void testObjectiveCAPI()
         JSSynchronousGarbageCollectForDebugging([context JSGlobalContextRef]);
 
         JSValue *myCustomProperty = [context evaluateScript:@"getLastNodeInChain(root).myCustomProperty"];
-        checkResult(@"duplicate calls to addManagedReference don't cause things to die", [myCustomProperty isNumber] && [myCustomProperty toInt32] == 42);
+        checkResult(@"duplicate calls to addManagedReference don't cause things to die", myCustomProperty.isNumber && [myCustomProperty toInt32] == 42);
     }
 
     @autoreleasepool {
@@ -1196,7 +1235,7 @@ void testObjectiveCAPI()
             NSLog(@"I'm intentionally not returning anything.");
         };
         JSValue *result = [context evaluateScript:@"new MyClass()"];
-        checkResult(@"result === undefined", [result isUndefined]);
+        checkResult(@"result === undefined", result.isUndefined);
         checkResult(@"exception.message is correct'", context.exception 
             && [@"Objective-C blocks called as constructors must return an object." isEqualToString:[context.exception[@"message"] toString]]);
     }
@@ -1318,7 +1357,7 @@ void testObjectiveCAPI()
             return [[UnexportedObject alloc] init];
         };
         JSValue *result = [context evaluateScript:@"(makeObject() instanceof UnexportedObject)"];
-        checkResult(@"makeObject() instanceof UnexportedObject", [result isBoolean] && [result toBool]);
+        checkResult(@"makeObject() instanceof UnexportedObject", result.isBoolean && [result toBool]);
     }
 
     @autoreleasepool {
@@ -1359,9 +1398,61 @@ void testObjectiveCAPI()
         checkResult(@"EdenCollection doesn't reclaim new managed values", [managedJSObject value] != nil);
     }
 
+    @autoreleasepool {
+        JSContext *context = [[JSContext alloc] init];
+        
+        pthread_t threadID;
+        pthread_create(&threadID, NULL, &threadMain, (__bridge void*)context);
+        pthread_join(threadID, nullptr);
+        JSSynchronousGarbageCollectForDebugging([context JSGlobalContextRef]);
+
+        checkResult(@"Did not crash after entering the VM from another thread", true);
+    }
+    
     currentThisInsideBlockGetterTest();
     runDateTests();
     runJSExportTests();
+    runRegress141275();
+    runRegress141809();
+}
+
+@protocol NumberProtocol <JSExport>
+
+@property (nonatomic) NSInteger number;
+
+@end
+
+@interface NumberObject : NSObject <NumberProtocol>
+
+@property (nonatomic) NSInteger number;
+
+@end
+
+@implementation NumberObject
+
+@end
+
+// Check that negative NSIntegers retain the correct value when passed into JS code.
+static void checkNegativeNSIntegers()
+{
+    NumberObject *container = [[NumberObject alloc] init];
+    container.number = -1;
+    JSContext *context = [[JSContext alloc] init];
+    context[@"container"] = container;
+    NSString *jsID = @"var getContainerNumber = function() { return container.number }";
+    [context evaluateScript:jsID];
+    JSValue *jsFunction = context[@"getContainerNumber"];
+    JSValue *result = [jsFunction callWithArguments:@[]];
+    
+    checkResult(@"Negative number maintained its original value", [[result toString] isEqualToString:@"-1"]);
+}
+
+void testObjectiveCAPI()
+{
+    NSLog(@"Testing Objective-C API");
+    checkNegativeNSIntegers();
+    testWeakValue();
+    testObjectiveCAPIMain();
 }
 
 #else

@@ -32,6 +32,7 @@
 #include "JSWeakObjectMapRefInternal.h"
 #include "JSCInlines.h"
 #include "Weak.h"
+#include "WeakGCMapInlines.h"
 #include <wtf/HashMap.h>
 #include <wtf/text/StringHash.h>
 
@@ -46,7 +47,7 @@ JSWeakObjectMapRef JSWeakObjectMapCreate(JSContextRef context, void* privateData
 {
     ExecState* exec = toJS(context);
     JSLockHolder locker(exec);
-    RefPtr<OpaqueJSWeakObjectMap> map = OpaqueJSWeakObjectMap::create(privateData, callback);
+    RefPtr<OpaqueJSWeakObjectMap> map = OpaqueJSWeakObjectMap::create(exec->vm(), privateData, callback);
     exec->lexicalGlobalObject()->registerWeakMap(map.get());
     return map.get();
 }
@@ -62,7 +63,9 @@ void JSWeakObjectMapSet(JSContextRef ctx, JSWeakObjectMapRef map, void* key, JSO
     JSObject* obj = toJS(object);
     if (!obj)
         return;
-    ASSERT(obj->inherits(JSCallbackObject<JSGlobalObject>::info()) || obj->inherits(JSCallbackObject<JSDestructibleObject>::info()));
+    ASSERT(obj->inherits(JSProxy::info())
+        || obj->inherits(JSCallbackObject<JSGlobalObject>::info()) 
+        || obj->inherits(JSCallbackObject<JSDestructibleObject>::info()));
     map->map().set(key, obj);
 }
 

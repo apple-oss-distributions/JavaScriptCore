@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006 Apple Inc.  All rights reserved.
+ * Copyright (C) 2006, 2015 Apple Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -35,17 +35,17 @@
 #define ASSERT_DISABLED 0
 #include <wtf/Assertions.h>
 
-#if OS(DARWIN)
-#include <mach/mach.h>
-#include <mach/mach_time.h>
-#include <sys/time.h>
-#endif
-
 #if OS(WINDOWS)
 #include <windows.h>
 #endif
 
+#include "CompareAndSwapTest.h"
 #include "CustomGlobalObjectClassTest.h"
+#include "GlobalContextWithFinalizerTest.h"
+
+#if OS(DARWIN)
+#include "ExecutionTimeLimitTest.h"
+#endif
 
 #if JSC_OBJC_API_ENABLED
 void testObjectiveCAPI(void);
@@ -84,11 +84,13 @@ static void assertEqualsAsUTF8String(JSValueRef value, const char* expectedValue
     size_t jsSize = JSStringGetMaximumUTF8CStringSize(valueAsString);
     char* jsBuffer = (char*)malloc(jsSize);
     JSStringGetUTF8CString(valueAsString, jsBuffer, jsSize);
-    
+
     unsigned i;
     for (i = 0; jsBuffer[i]; i++) {
         if (jsBuffer[i] != expectedValue[i]) {
             fprintf(stderr, "assertEqualsAsUTF8String failed at character %d: %c(%d) != %c(%d)\n", i, jsBuffer[i], jsBuffer[i], expectedValue[i], expectedValue[i]);
+            fprintf(stderr, "value: %s\n", jsBuffer);
+            fprintf(stderr, "expectedValue: %s\n", expectedValue);
             failed = 1;
         }
     }
@@ -123,7 +125,11 @@ static void assertEqualsAsCharactersPtr(JSValueRef value, const char* expectedVa
     }
     
     if (jsLength != (size_t)cfLength) {
-        fprintf(stderr, "assertEqualsAsCharactersPtr failed: jsLength(%ld) != cfLength(%ld)\n", jsLength, cfLength);
+#if OS(WINDOWS)
+        fprintf(stderr, "assertEqualsAsCharactersPtr failed: jsLength(%Iu) != cfLength(%Iu)\n", jsLength, (size_t)cfLength);
+#else
+        fprintf(stderr, "assertEqualsAsCharactersPtr failed: jsLength(%zu) != cfLength(%zu)\n", jsLength, (size_t)cfLength);
+#endif
         failed = 1;
     }
 
@@ -954,6 +960,7 @@ static JSStaticValue globalObject_staticValues[] = {
 
 static JSStaticFunction globalObject_staticFunctions[] = {
     { "globalStaticFunction", globalObject_call, kJSPropertyAttributeNone },
+    { "globalStaticFunction2", globalObject_call, kJSPropertyAttributeNone },
     { "gc", functionGC, kJSPropertyAttributeNone },
     { 0, 0, 0 }
 };
@@ -1108,76 +1115,26 @@ static void checkConstnessInJSObjectNames()
     val.name = "something";
 }
 
-#if OS(DARWIN)
-static double currentCPUTime()
-{
-    mach_msg_type_number_t infoCount = THREAD_BASIC_INFO_COUNT;
-    thread_basic_info_data_t info;
-
-    /* Get thread information */
-    mach_port_t threadPort = mach_thread_self();
-    thread_info(threadPort, THREAD_BASIC_INFO, (thread_info_t)(&info), &infoCount);
-    mach_port_deallocate(mach_task_self(), threadPort);
-    
-    double time = info.user_time.seconds + info.user_time.microseconds / 1000000.;
-    time += info.system_time.seconds + info.system_time.microseconds / 1000000.;
-    
-    return time;
-}
-
-static JSValueRef currentCPUTime_callAsFunction(JSContextRef ctx, JSObjectRef functionObject, JSObjectRef thisObject, size_t argumentCount, const JSValueRef arguments[], JSValueRef* exception)
-{
-    UNUSED_PARAM(functionObject);
-    UNUSED_PARAM(thisObject);
-    UNUSED_PARAM(argumentCount);
-    UNUSED_PARAM(arguments);
-    UNUSED_PARAM(exception);
-
-    ASSERT(JSContextGetGlobalContext(ctx) == context);
-    return JSValueMakeNumber(ctx, currentCPUTime());
-}
-
-bool shouldTerminateCallbackWasCalled = false;
-static bool shouldTerminateCallback(JSContextRef ctx, void* context)
-{
-    UNUSED_PARAM(ctx);
-    UNUSED_PARAM(context);
-    shouldTerminateCallbackWasCalled = true;
-    return true;
-}
-
-bool cancelTerminateCallbackWasCalled = false;
-static bool cancelTerminateCallback(JSContextRef ctx, void* context)
-{
-    UNUSED_PARAM(ctx);
-    UNUSED_PARAM(context);
-    cancelTerminateCallbackWasCalled = true;
-    return false;
-}
-
-int extendTerminateCallbackCalled = 0;
-static bool extendTerminateCallback(JSContextRef ctx, void* context)
-{
-    UNUSED_PARAM(context);
-    extendTerminateCallbackCalled++;
-    if (extendTerminateCallbackCalled == 1) {
-        JSContextGroupRef contextGroup = JSContextGetGroup(ctx);
-        JSContextGroupSetExecutionTimeLimit(contextGroup, .200f, extendTerminateCallback, 0);
-        return false;
-    }
-    return true;
-}
-#endif /* OS(DARWIN) */
-
 
 int main(int argc, char* argv[])
 {
 #if OS(WINDOWS)
+#if defined(_M_X64) || defined(__x86_64__)
+    // The VS2013 runtime has a bug where it mis-detects AVX-capable processors
+    // if the feature has been disabled in firmware. This causes us to crash
+    // in some of the math functions. For now, we disable those optimizations
+    // because Microsoft is not going to fix the problem in VS2013.
+    // FIXME: http://webkit.org/b/141449: Remove this workaround when we switch to VS2015+.
+    _set_FMA3_enable(0);
+#endif
+
     // Cygwin calls ::SetErrorMode(SEM_FAILCRITICALERRORS), which we will inherit. This is bad for
     // testing/debugging, as it causes the post-mortem debugger not to be invoked. We reset the
     // error mode here to work around Cygwin's behavior. See <http://webkit.org/b/55222>.
     ::SetErrorMode(0);
 #endif
+
+    testCompareAndSwap();
 
 #if JSC_OBJC_API_ENABLED
     testObjectiveCAPI();
@@ -1292,6 +1249,8 @@ int main(int argc, char* argv[])
 
     ASSERT(!JSValueIsBoolean(context, NULL));
     ASSERT(!JSValueIsObject(context, NULL));
+    ASSERT(!JSValueIsArray(context, NULL));
+    ASSERT(!JSValueIsDate(context, NULL));
     ASSERT(!JSValueIsString(context, NULL));
     ASSERT(!JSValueIsNumber(context, NULL));
     ASSERT(!JSValueIsUndefined(context, NULL));
@@ -1452,8 +1411,10 @@ int main(int argc, char* argv[])
     } else
         printf("PASS: Correctly serialised with indent of 4.\n");
     JSStringRelease(str);
-    JSStringRef src = JSStringCreateWithUTF8CString("({get a(){ throw '';}})");
-    JSValueRef unstringifiableObj = JSEvaluateScript(context, src, NULL, NULL, 1, NULL);
+
+    str = JSStringCreateWithUTF8CString("({get a(){ throw '';}})");
+    JSValueRef unstringifiableObj = JSEvaluateScript(context, str, NULL, NULL, 1, NULL);
+    JSStringRelease(str);
     
     str = JSValueCreateJSONString(context, unstringifiableObj, 4, 0);
     if (str) {
@@ -1636,7 +1597,7 @@ int main(int argc, char* argv[])
     ASSERT(!JSObjectMakeFunction(context, NULL, 0, NULL, functionBody, NULL, 1, &exception));
     ASSERT(JSValueIsObject(context, exception));
     v = JSObjectGetProperty(context, JSValueToObject(context, exception, NULL), line, NULL);
-    assertEqualsAsNumber(v, 1);
+    assertEqualsAsNumber(v, 2);
     JSStringRelease(functionBody);
     JSStringRelease(line);
 
@@ -1646,7 +1607,7 @@ int main(int argc, char* argv[])
     ASSERT(!JSObjectMakeFunction(context, NULL, 0, NULL, functionBody, NULL, -42, &exception));
     ASSERT(JSValueIsObject(context, exception));
     v = JSObjectGetProperty(context, JSValueToObject(context, exception, NULL), line, NULL);
-    assertEqualsAsNumber(v, 1);
+    assertEqualsAsNumber(v, 2);
     JSStringRelease(functionBody);
     JSStringRelease(line);
 
@@ -1656,7 +1617,7 @@ int main(int argc, char* argv[])
     ASSERT(!JSObjectMakeFunction(context, NULL, 0, NULL, functionBody, NULL, 1, &exception));
     ASSERT(JSValueIsObject(context, exception));
     v = JSObjectGetProperty(context, JSValueToObject(context, exception, NULL), line, NULL);
-    assertEqualsAsNumber(v, 2);
+    assertEqualsAsNumber(v, 3);
     JSStringRelease(functionBody);
     JSStringRelease(line);
 
@@ -1690,7 +1651,7 @@ int main(int argc, char* argv[])
     JSStringRelease(functionBody);
     
     string = JSValueToStringCopy(context, function, NULL);
-    assertEqualsAsUTF8String(JSValueMakeString(context, string), "function foo(foo) { return foo;\n}");
+    assertEqualsAsUTF8String(JSValueMakeString(context, string), "function foo(foo) {\nreturn foo;\n}");
     JSStringRelease(string);
 
     JSStringRef print = JSStringCreateWithUTF8CString("print");
@@ -1821,6 +1782,16 @@ int main(int argc, char* argv[])
     ASSERT(JSValueIsEqual(context, v, o, NULL));
     JSStringRelease(script);
 
+    script = JSStringCreateWithUTF8CString("[ ]");
+    v = JSEvaluateScript(context, script, NULL, NULL, 1, NULL);
+    ASSERT(JSValueIsArray(context, v));
+    JSStringRelease(script);
+
+    script = JSStringCreateWithUTF8CString("new Date");
+    v = JSEvaluateScript(context, script, NULL, NULL, 1, NULL);
+    ASSERT(JSValueIsDate(context, v));
+    JSStringRelease(script);
+
     exception = NULL;
     script = JSStringCreateWithUTF8CString("rreturn Array;");
     JSStringRef sourceURL = JSStringCreateWithUTF8CString("file:///foo/bar.js");
@@ -1878,158 +1849,32 @@ int main(int argc, char* argv[])
         free(scriptUTF8);
     }
 
+    // Check Promise is not exposed.
+    {
+        JSObjectRef globalObject = JSContextGetGlobalObject(context);
+        {
+            JSStringRef promiseProperty = JSStringCreateWithUTF8CString("Promise");
+            ASSERT(!JSObjectHasProperty(context, globalObject, promiseProperty));
+            JSStringRelease(promiseProperty);
+        }
+        {
+            JSStringRef script = JSStringCreateWithUTF8CString("typeof Promise");
+            JSStringRef undefined = JSStringCreateWithUTF8CString("undefined");
+            JSValueRef value = JSEvaluateScript(context, script, NULL, NULL, 1, NULL);
+            ASSERT(JSValueIsString(context, value));
+            JSStringRef valueAsString = JSValueToStringCopy(context, value, NULL);
+            ASSERT(JSStringIsEqual(valueAsString, undefined));
+            JSStringRelease(valueAsString);
+            JSStringRelease(undefined);
+            JSStringRelease(script);
+        }
+        printf("PASS: Promise is not exposed under JSContext API.\n");
+    }
+
 #if OS(DARWIN)
-    JSStringRef currentCPUTimeStr = JSStringCreateWithUTF8CString("currentCPUTime");
-    JSObjectRef currentCPUTimeFunction = JSObjectMakeFunctionWithCallback(context, currentCPUTimeStr, currentCPUTime_callAsFunction);
-    JSObjectSetProperty(context, globalObject, currentCPUTimeStr, currentCPUTimeFunction, kJSPropertyAttributeNone, NULL); 
-    JSStringRelease(currentCPUTimeStr);
-
-    /* Test script timeout: */
-    JSContextGroupSetExecutionTimeLimit(contextGroup, .10f, shouldTerminateCallback, 0);
-    {
-        const char* loopForeverScript = "var startTime = currentCPUTime(); while (true) { if (currentCPUTime() - startTime > .150) break; } ";
-        JSStringRef script = JSStringCreateWithUTF8CString(loopForeverScript);
-        double startTime;
-        double endTime;
-        exception = NULL;
-        shouldTerminateCallbackWasCalled = false;
-        startTime = currentCPUTime();
-        v = JSEvaluateScript(context, script, NULL, NULL, 1, &exception);
-        endTime = currentCPUTime();
-
-        if (((endTime - startTime) < .150f) && shouldTerminateCallbackWasCalled)
-            printf("PASS: script timed out as expected.\n");
-        else {
-            if (!((endTime - startTime) < .150f))
-                printf("FAIL: script did not timed out as expected.\n");
-            if (!shouldTerminateCallbackWasCalled)
-                printf("FAIL: script timeout callback was not called.\n");
-            failed = true;
-        }
-
-        if (!exception) {
-            printf("FAIL: TerminatedExecutionException was not thrown.\n");
-            failed = true;
-        }
-    }
-
-    /* Test the script timeout's TerminatedExecutionException should NOT be catchable: */
-    JSContextGroupSetExecutionTimeLimit(contextGroup, 0.10f, shouldTerminateCallback, 0);
-    {
-        const char* loopForeverScript = "var startTime = currentCPUTime(); try { while (true) { if (currentCPUTime() - startTime > .150) break; } } catch(e) { }";
-        JSStringRef script = JSStringCreateWithUTF8CString(loopForeverScript);
-        double startTime;
-        double endTime;
-        exception = NULL;
-        shouldTerminateCallbackWasCalled = false;
-        startTime = currentCPUTime();
-        v = JSEvaluateScript(context, script, NULL, NULL, 1, &exception);
-        endTime = currentCPUTime();
-
-        if (((endTime - startTime) >= .150f) || !shouldTerminateCallbackWasCalled) {
-            if (!((endTime - startTime) < .150f))
-                printf("FAIL: script did not timed out as expected.\n");
-            if (!shouldTerminateCallbackWasCalled)
-                printf("FAIL: script timeout callback was not called.\n");
-            failed = true;
-        }
-
-        if (exception)
-            printf("PASS: TerminatedExecutionException was not catchable as expected.\n");
-        else {
-            printf("FAIL: TerminatedExecutionException was caught.\n");
-            failed = true;
-        }
-    }
-
-    /* Test script timeout with no callback: */
-    JSContextGroupSetExecutionTimeLimit(contextGroup, .10f, 0, 0);
-    {
-        const char* loopForeverScript = "var startTime = currentCPUTime(); while (true) { if (currentCPUTime() - startTime > .150) break; } ";
-        JSStringRef script = JSStringCreateWithUTF8CString(loopForeverScript);
-        double startTime;
-        double endTime;
-        exception = NULL;
-        startTime = currentCPUTime();
-        v = JSEvaluateScript(context, script, NULL, NULL, 1, &exception);
-        endTime = currentCPUTime();
-
-        if (((endTime - startTime) < .150f) && shouldTerminateCallbackWasCalled)
-            printf("PASS: script timed out as expected when no callback is specified.\n");
-        else {
-            if (!((endTime - startTime) < .150f))
-                printf("FAIL: script did not timed out as expected when no callback is specified.\n");
-            failed = true;
-        }
-
-        if (!exception) {
-            printf("FAIL: TerminatedExecutionException was not thrown.\n");
-            failed = true;
-        }
-    }
-
-    /* Test script timeout cancellation: */
-    JSContextGroupSetExecutionTimeLimit(contextGroup, 0.10f, cancelTerminateCallback, 0);
-    {
-        const char* loopForeverScript = "var startTime = currentCPUTime(); while (true) { if (currentCPUTime() - startTime > .150) break; } ";
-        JSStringRef script = JSStringCreateWithUTF8CString(loopForeverScript);
-        double startTime;
-        double endTime;
-        exception = NULL;
-        startTime = currentCPUTime();
-        v = JSEvaluateScript(context, script, NULL, NULL, 1, &exception);
-        endTime = currentCPUTime();
-
-        if (((endTime - startTime) >= .150f) && cancelTerminateCallbackWasCalled && !exception)
-            printf("PASS: script timeout was cancelled as expected.\n");
-        else {
-            if (((endTime - startTime) < .150) || exception)
-                printf("FAIL: script timeout was not cancelled.\n");
-            if (!cancelTerminateCallbackWasCalled)
-                printf("FAIL: script timeout callback was not called.\n");
-            failed = true;
-        }
-
-        if (exception) {
-            printf("FAIL: Unexpected TerminatedExecutionException thrown.\n");
-            failed = true;
-        }
-    }
-
-    /* Test script timeout extension: */
-    JSContextGroupSetExecutionTimeLimit(contextGroup, 0.100f, extendTerminateCallback, 0);
-    {
-        const char* loopForeverScript = "var startTime = currentCPUTime(); while (true) { if (currentCPUTime() - startTime > .500) break; } ";
-        JSStringRef script = JSStringCreateWithUTF8CString(loopForeverScript);
-        double startTime;
-        double endTime;
-        double deltaTime;
-        exception = NULL;
-        startTime = currentCPUTime();
-        v = JSEvaluateScript(context, script, NULL, NULL, 1, &exception);
-        endTime = currentCPUTime();
-        deltaTime = endTime - startTime;
-
-        if ((deltaTime >= .300f) && (deltaTime < .500f) && (extendTerminateCallbackCalled == 2) && exception)
-            printf("PASS: script timeout was extended as expected.\n");
-        else {
-            if (deltaTime < .200f)
-                printf("FAIL: script timeout was not extended as expected.\n");
-            else if (deltaTime >= .500f)
-                printf("FAIL: script did not timeout.\n");
-
-            if (extendTerminateCallbackCalled < 1)
-                printf("FAIL: script timeout callback was not called.\n");
-            if (extendTerminateCallbackCalled < 2)
-                printf("FAIL: script timeout callback was not called after timeout extension.\n");
-
-            if (!exception)
-                printf("FAIL: TerminatedExecutionException was not thrown during timeout extension test.\n");
-
-            failed = true;
-        }
-    }
+    failed = testExecutionTimeLimit() || failed;
 #endif /* OS(DARWIN) */
+    failed = testGlobalContextWithFinalizer() || failed;
 
     // Clear out local variables pointing at JSObjectRefs to allow their values to be collected
     function = NULL;
@@ -2079,6 +1924,8 @@ int main(int argc, char* argv[])
         printf("PASS: global context name behaves as expected.\n");
 
     customGlobalObjectClassTest();
+    globalObjectSetPrototypeTest();
+    globalObjectPrivatePropertyTest();
 
     if (failed) {
         printf("FAIL: Some tests failed.\n");
@@ -2119,3 +1966,10 @@ static char* createStringWithContentsOfFile(const char* fileName)
     
     return buffer;
 }
+
+#if OS(WINDOWS)
+extern "C" __declspec(dllexport) int WINAPI dllLauncherEntryPoint(int argc, const char* argv[])
+{
+    return main(argc, const_cast<char**>(argv));
+}
+#endif
