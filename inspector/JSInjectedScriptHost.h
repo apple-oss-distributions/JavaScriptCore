@@ -28,6 +28,10 @@
 
 #include "JSDestructibleObject.h"
 
+namespace JSC {
+class WeakMapData;
+}
+
 namespace Inspector {
 
 class InjectedScriptHost;
@@ -44,9 +48,9 @@ public:
         return JSC::Structure::create(vm, globalObject, prototype, JSC::TypeInfo(JSC::ObjectType, StructureFlags), info());
     }
 
-    static JSInjectedScriptHost* create(JSC::VM& vm, JSC::Structure* structure, Ref<InjectedScriptHost>&& impl)
+    static JSInjectedScriptHost* create(JSC::VM& vm, JSC::Structure* structure, PassRefPtr<InjectedScriptHost> impl)
     {
-        JSInjectedScriptHost* instance = new (NotNull, JSC::allocateCell<JSInjectedScriptHost>(vm.heap)) JSInjectedScriptHost(vm, structure, WTF::move(impl));
+        JSInjectedScriptHost* instance = new (NotNull, JSC::allocateCell<JSInjectedScriptHost>(vm.heap)) JSInjectedScriptHost(vm, structure, impl);
         instance->finishCreation(vm);
         return instance;
     }
@@ -54,7 +58,8 @@ public:
     static JSC::JSObject* createPrototype(JSC::VM&, JSC::JSGlobalObject*);
     static void destroy(JSC::JSCell*);
 
-    InjectedScriptHost& impl() const { return const_cast<InjectedScriptHost&>(m_wrapped.get()); }
+    InjectedScriptHost& impl() const { return *m_impl; }
+    void releaseImpl();
 
     // Attributes.
     JSC::JSValue evaluate(JSC::ExecState*) const;
@@ -75,10 +80,14 @@ protected:
     void finishCreation(JSC::VM&);
 
 private:
-    JSInjectedScriptHost(JSC::VM&, JSC::Structure*, Ref<InjectedScriptHost>&&);
+    JSInjectedScriptHost(JSC::VM&, JSC::Structure*, PassRefPtr<InjectedScriptHost>);
+    ~JSInjectedScriptHost();
 
-    Ref<InjectedScriptHost> m_wrapped;
+    InjectedScriptHost* m_impl;
 };
+
+JSC::JSValue toJS(JSC::ExecState*, JSC::JSGlobalObject*, InjectedScriptHost*);
+JSInjectedScriptHost* toJSInjectedScriptHost(JSC::JSValue);
 
 } // namespace Inspector
 

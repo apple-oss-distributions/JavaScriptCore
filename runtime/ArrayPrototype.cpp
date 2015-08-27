@@ -404,8 +404,9 @@ static inline JSValue join(ExecState& state, JSObject* thisObject, StringView se
         bool holesKnownToBeOK = false;
         for (unsigned i = 0; i < length; ++i) {
             if (JSValue value = data[i].get()) {
-                if (!joiner.appendWithoutSideEffects(state, value))
-                    goto generalCase;
+                joiner.append(state, value);
+                if (state.hadException())
+                    return jsUndefined();
             } else {
                 if (!holesKnownToBeOK) {
                     if (holesMustForwardToPrototype(state, thisObject))
@@ -453,8 +454,9 @@ static inline JSValue join(ExecState& state, JSObject* thisObject, StringView se
         auto data = storage.vector().data();
         for (unsigned i = 0; i < length; ++i) {
             if (JSValue value = data[i].get()) {
-                if (!joiner.appendWithoutSideEffects(state, value))
-                    goto generalCase;
+                joiner.append(state, value);
+                if (state.hadException())
+                    return jsUndefined();
             } else
                 joiner.appendEmptyString();
         }
@@ -729,7 +731,7 @@ EncodedJSValue JSC_HOST_CALL arrayProtoFuncSlice(ExecState* exec)
     unsigned begin = argumentClampedIndexFromStartOrEnd(exec, 0, length);
     unsigned end = argumentClampedIndexFromStartOrEnd(exec, 1, length, length);
 
-    if (isJSArray(thisObj) && length == getLength(exec, thisObj)) {
+    if (isJSArray(thisObj)) {
         if (JSArray* result = asArray(thisObj)->fastSlice(*exec, begin, end - begin))
             return JSValue::encode(result);
     }
@@ -777,7 +779,7 @@ EncodedJSValue JSC_HOST_CALL arrayProtoFuncSplice(ExecState* exec)
 
     JSArray* result = nullptr;
 
-    if (isJSArray(thisObj) && length == getLength(exec, thisObj))
+    if (isJSArray(thisObj))
         result = asArray(thisObj)->fastSlice(*exec, begin, deleteCount);
 
     if (!result) {

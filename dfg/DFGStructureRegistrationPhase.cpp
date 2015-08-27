@@ -57,7 +57,7 @@ public:
         registerStructure(m_graph.m_vm.getterSetterStructure.get());
         
         for (FrozenValue* value : m_graph.m_frozenValues)
-            assertIsRegistered(value->structure());
+            m_graph.assertIsRegistered(value->structure());
         
         for (BlockIndex blockIndex = m_graph.numBlocks(); blockIndex--;) {
             BasicBlock* block = m_graph.block(blockIndex);
@@ -69,7 +69,7 @@ public:
             
                 switch (node->op()) {
                 case CheckStructure:
-                    assertAreRegistered(node->structureSet());
+                    registerStructures(node->structureSet());
                     break;
                 
                 case NewObject:
@@ -152,26 +152,14 @@ public:
 private:
     void registerStructures(const StructureSet& set)
     {
-        for (Structure* structure : set)
-            registerStructure(structure);
+        for (unsigned i = set.size(); i--;)
+            registerStructure(set[i]);
     }
     
     void registerStructure(Structure* structure)
     {
         if (structure)
             m_graph.registerStructure(structure);
-    }
-
-    void assertAreRegistered(const StructureSet& set)
-    {
-        for (Structure* structure : set)
-            assertIsRegistered(structure);
-    }
-
-    void assertIsRegistered(Structure* structure)
-    {
-        if (structure)
-            m_graph.assertIsRegistered(structure);
     }
 };
 

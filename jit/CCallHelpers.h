@@ -2015,6 +2015,7 @@ public:
     void jumpToExceptionHandler()
     {
         // genericUnwind() leaves the handler CallFrame* in vm->callFrameForThrow,
+        // the topVMEntryFrame for the handler in vm->vmEntryFrameForThrow,
         // and the address of the handler in vm->targetMachinePCForThrow.
         loadPtr(&vm()->targetMachinePCForThrow, GPRInfo::regT1);
         jump(GPRInfo::regT1);

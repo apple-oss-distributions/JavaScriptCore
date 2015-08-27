@@ -136,11 +136,6 @@ bool InspectorDebuggerAgent::isPaused()
     return scriptDebugServer().isPaused();
 }
 
-void InspectorDebuggerAgent::setSuppressAllPauses(bool suppress)
-{
-    scriptDebugServer().setSuppressAllPauses(suppress);
-}
-
 static RefPtr<InspectorObject> buildAssertPauseReason(const String& message)
 {
     auto reason = Inspector::Protocol::Debugger::AssertPauseReason::create().release();
@@ -189,7 +184,7 @@ void InspectorDebuggerAgent::handleConsoleAssert(const String& message)
         breakProgram(DebuggerFrontendDispatcher::Reason::Assert, buildAssertPauseReason(message));
 }
 
-static Ref<InspectorObject> buildObjectForBreakpointCookie(const String& url, int lineNumber, int columnNumber, const String& condition, RefPtr<InspectorArray>& actions, bool isRegex, bool autoContinue, unsigned ignoreCount)
+static Ref<InspectorObject> buildObjectForBreakpointCookie(const String& url, int lineNumber, int columnNumber, const String& condition, RefPtr<InspectorArray>& actions, bool isRegex, bool autoContinue)
 {
     Ref<InspectorObject> breakpointObject = InspectorObject::create();
     breakpointObject->setString(ASCIILiteral("url"), url);
@@ -198,7 +193,6 @@ static Ref<InspectorObject> buildObjectForBreakpointCookie(const String& url, in
     breakpointObject->setString(ASCIILiteral("condition"), condition);
     breakpointObject->setBoolean(ASCIILiteral("isRegex"), isRegex);
     breakpointObject->setBoolean(ASCIILiteral("autoContinue"), autoContinue);
-    breakpointObject->setInteger(ASCIILiteral("ignoreCount"), ignoreCount);
 
     if (actions)
         breakpointObject->setArray(ASCIILiteral("actions"), actions);
@@ -301,22 +295,20 @@ void InspectorDebuggerAgent::setBreakpointByUrl(ErrorString& errorString, int li
 
     String condition = emptyString();
     bool autoContinue = false;
-    unsigned ignoreCount = 0;
     RefPtr<InspectorArray> actions;
     if (options) {
         options->getString(ASCIILiteral("condition"), condition);
         options->getBoolean(ASCIILiteral("autoContinue"), autoContinue);
         options->getArray(ASCIILiteral("actions"), actions);
-        options->getInteger(ASCIILiteral("ignoreCount"), ignoreCount);
     }
 
     BreakpointActions breakpointActions;
     if (!breakpointActionsFromProtocol(errorString, actions, &breakpointActions))
         return;
 
-    m_javaScriptBreakpoints.set(breakpointIdentifier, buildObjectForBreakpointCookie(url, lineNumber, columnNumber, condition, actions, isRegex, autoContinue, ignoreCount));
+    m_javaScriptBreakpoints.set(breakpointIdentifier, buildObjectForBreakpointCookie(url, lineNumber, columnNumber, condition, actions, isRegex, autoContinue));
 
-    ScriptBreakpoint breakpoint(lineNumber, columnNumber, condition, breakpointActions, autoContinue, ignoreCount);
+    ScriptBreakpoint breakpoint(lineNumber, columnNumber, condition, breakpointActions, autoContinue);
     for (ScriptsMap::iterator it = m_scripts.begin(); it != m_scripts.end(); ++it) {
         String scriptURL = !it->value.sourceURL.isEmpty() ? it->value.sourceURL : it->value.url;
         if (!matches(scriptURL, url, isRegex))
@@ -354,13 +346,11 @@ void InspectorDebuggerAgent::setBreakpoint(ErrorString& errorString, const Inspe
 
     String condition = emptyString();
     bool autoContinue = false;
-    unsigned ignoreCount = 0;
     RefPtr<InspectorArray> actions;
     if (options) {
         options->getString(ASCIILiteral("condition"), condition);
         options->getBoolean(ASCIILiteral("autoContinue"), autoContinue);
         options->getArray(ASCIILiteral("actions"), actions);
-        options->getInteger(ASCIILiteral("ignoreCount"), ignoreCount);
     }
 
     BreakpointActions breakpointActions;
@@ -373,7 +363,7 @@ void InspectorDebuggerAgent::setBreakpoint(ErrorString& errorString, const Inspe
         return;
     }
 
-    ScriptBreakpoint breakpoint(lineNumber, columnNumber, condition, breakpointActions, autoContinue, ignoreCount);
+    ScriptBreakpoint breakpoint(lineNumber, columnNumber, condition, breakpointActions, autoContinue);
     actualLocation = resolveBreakpoint(breakpointIdentifier, sourceID, breakpoint);
     if (!actualLocation) {
         errorString = ASCIILiteral("Could not resolve breakpoint");
@@ -411,7 +401,7 @@ void InspectorDebuggerAgent::continueToLocation(ErrorString& errorString, const 
     if (!parseLocation(errorString, location, sourceID, lineNumber, columnNumber))
         return;
 
-    ScriptBreakpoint breakpoint(lineNumber, columnNumber, "", false, 0);
+    ScriptBreakpoint breakpoint(lineNumber, columnNumber, "", false);
     m_continueToLocationBreakpointID = scriptDebugServer().setBreakpoint(sourceID, breakpoint, &lineNumber, &columnNumber);
     resume(errorString);
 }
@@ -606,16 +596,20 @@ Ref<Inspector::Protocol::Array<Inspector::Protocol::Debugger::CallFrame>> Inspec
 
 String InspectorDebuggerAgent::sourceMapURLForScript(const Script& script)
 {
-    return script.sourceMappingURL;
+    return ContentSearchUtilities::findScriptSourceMapURL(script.source);
 }
 
-void InspectorDebuggerAgent::didParseSource(JSC::SourceID sourceID, const Script& script)
+void InspectorDebuggerAgent::didParseSource(JSC::SourceID sourceID, const Script& inScript)
 {
+    Script script = inScript;
+    if (script.startLine <= 0 && !script.startColumn)
+        script.sourceURL = ContentSearchUtilities::findScriptSourceURL(script.source);
+    script.sourceMappingURL = sourceMapURLForScript(script);
+
     bool hasSourceURL = !script.sourceURL.isEmpty();
     String scriptURL = hasSourceURL ? script.sourceURL : script.url;
     bool* hasSourceURLParam = hasSourceURL ? &hasSourceURL : nullptr;
-    String sourceMappingURL = sourceMapURLForScript(script);
-    String* sourceMapURLParam = sourceMappingURL.isNull() ? nullptr : &sourceMappingURL;
+    String* sourceMapURLParam = script.sourceMappingURL.isNull() ? nullptr : &script.sourceMappingURL;
     const bool* isContentScript = script.isContentScript ? &script.isContentScript : nullptr;
     String scriptIDStr = String::number(sourceID);
     m_frontendDispatcher->scriptParsed(scriptIDStr, scriptURL, script.startLine, script.startColumn, script.endLine, script.endColumn, isContentScript, sourceMapURLParam, hasSourceURLParam);
@@ -642,7 +636,6 @@ void InspectorDebuggerAgent::didParseSource(JSC::SourceID sourceID, const Script
         breakpointObject->getInteger(ASCIILiteral("columnNumber"), breakpoint.columnNumber);
         breakpointObject->getString(ASCIILiteral("condition"), breakpoint.condition);
         breakpointObject->getBoolean(ASCIILiteral("autoContinue"), breakpoint.autoContinue);
-        breakpointObject->getInteger(ASCIILiteral("ignoreCount"), breakpoint.ignoreCount);
         ErrorString errorString;
         RefPtr<InspectorArray> actions;
         breakpointObject->getArray(ASCIILiteral("actions"), actions);

@@ -27,7 +27,8 @@
 #define InjectedScriptHost_h
 
 #include "JSCJSValueInlines.h"
-#include "inspector/PerGlobalObjectWrapperWorld.h"
+#include "Strong.h"
+#include "StrongInlines.h"
 #include <wtf/HashMap.h>
 #include <wtf/RefCounted.h>
 
@@ -41,11 +42,12 @@ public:
     virtual JSC::JSValue subtype(JSC::ExecState*, JSC::JSValue) { return JSC::jsUndefined(); }
     virtual bool isHTMLAllCollection(JSC::JSValue) { return false; }
 
-    JSC::JSValue wrapper(JSC::ExecState*, JSC::JSGlobalObject*);
+    JSC::JSValue jsWrapper(JSC::ExecState*, JSC::JSGlobalObject*);
+    void clearWrapper(JSC::ExecState*, JSC::JSGlobalObject*);
     void clearAllWrappers();
 
 private:
-    PerGlobalObjectWrapperWorld m_wrappers;
+    HashMap<std::pair<JSC::ExecState*, JSC::JSGlobalObject*>, JSC::Strong<JSC::JSObject>> m_wrappers;
 };
 
 } // namespace Inspector

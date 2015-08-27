@@ -35,16 +35,21 @@ namespace JSC {
 
 struct Breakpoint : public DoublyLinkedListNode<Breakpoint> {
     Breakpoint()
+        : id(noBreakpointID)
+        , sourceID(noSourceID)
+        , line(0)
+        , column(0)
+        , autoContinue(false)
     {
     }
 
-    Breakpoint(SourceID sourceID, unsigned line, unsigned column, const String& condition, bool autoContinue, unsigned ignoreCount)
-        : sourceID(sourceID)
+    Breakpoint(SourceID sourceID, unsigned line, unsigned column, const String& condition, bool autoContinue)
+        : id(noBreakpointID)
+        , sourceID(sourceID)
         , line(line)
         , column(column)
         , condition(condition)
         , autoContinue(autoContinue)
-        , ignoreCount(ignoreCount)
     {
     }
 
@@ -55,19 +60,15 @@ struct Breakpoint : public DoublyLinkedListNode<Breakpoint> {
         , column(other.column)
         , condition(other.condition)
         , autoContinue(other.autoContinue)
-        , ignoreCount(other.ignoreCount)
-        , hitCount(other.hitCount)
     {
     }
 
-    BreakpointID id { noBreakpointID };
-    SourceID sourceID { noSourceID };
-    unsigned line { 0 };
-    unsigned column { 0 };
+    BreakpointID id;
+    SourceID sourceID;
+    unsigned line;
+    unsigned column;
     String condition;
-    bool autoContinue { false };
-    unsigned ignoreCount { 0 };
-    unsigned hitCount { 0 };
+    bool autoContinue;
 
     static const unsigned unspecifiedColumn = UINT_MAX;
 

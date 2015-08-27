@@ -111,18 +111,20 @@ void JIT_OPERATION operationThrowStackOverflowError(ExecState* exec, CodeBlock* 
         callerFrame = exec;
 
     NativeCallFrameTracerWithRestore tracer(vm, vmEntryFrame, callerFrame);
-    throwStackOverflowError(callerFrame);
+    ErrorHandlingScope errorScope(*vm);
+    vm->throwException(callerFrame, createStackOverflowError(callerFrame));
 }
 
 int32_t JIT_OPERATION operationCallArityCheck(ExecState* exec)
 {
     VM* vm = &exec->vm();
+    VMEntryFrame* vmEntryFrame = vm->topVMEntryFrame;
+    CallFrame* callerFrame = exec->callerFrame(vmEntryFrame);
+
     JSStack& stack = vm->interpreter->stack();
 
     int32_t missingArgCount = CommonSlowPaths::arityCheckFor(exec, &stack, CodeForCall);
     if (missingArgCount < 0) {
-        VMEntryFrame* vmEntryFrame = vm->topVMEntryFrame;
-        CallFrame* callerFrame = exec->callerFrame(vmEntryFrame);
         NativeCallFrameTracerWithRestore tracer(vm, vmEntryFrame, callerFrame);
         throwStackOverflowError(callerFrame);
     }
@@ -133,12 +135,13 @@ int32_t JIT_OPERATION operationCallArityCheck(ExecState* exec)
 int32_t JIT_OPERATION operationConstructArityCheck(ExecState* exec)
 {
     VM* vm = &exec->vm();
+    VMEntryFrame* vmEntryFrame = vm->topVMEntryFrame;
+    CallFrame* callerFrame = exec->callerFrame(vmEntryFrame);
+
     JSStack& stack = vm->interpreter->stack();
 
     int32_t missingArgCount = CommonSlowPaths::arityCheckFor(exec, &stack, CodeForConstruct);
     if (missingArgCount < 0) {
-        VMEntryFrame* vmEntryFrame = vm->topVMEntryFrame;
-        CallFrame* callerFrame = exec->callerFrame(vmEntryFrame);
         NativeCallFrameTracerWithRestore tracer(vm, vmEntryFrame, callerFrame);
         throwStackOverflowError(callerFrame);
     }
@@ -1914,7 +1917,7 @@ void JIT_OPERATION operationThrow(ExecState* exec, EncodedJSValue encodedExcepti
     JSValue exceptionValue = JSValue::decode(encodedExceptionValue);
     vm->throwException(exec, exceptionValue);
 
-    // Results stored out-of-band in vm.targetMachinePCForThrow & vm.callFrameForThrow
+    // Results stored out-of-band in vm.targetMachinePCForThrow, vm.callFrameForThrow & vm.vmEntryFrameForThrow
     genericUnwind(vm, exec);
 }
 
@@ -1960,8 +1963,12 @@ void JIT_OPERATION lookupExceptionHandler(VM* vm, ExecState* exec)
 
 void JIT_OPERATION lookupExceptionHandlerFromCallerFrame(VM* vm, ExecState* exec)
 {
-    NativeCallFrameTracer tracer(vm, exec);
-    genericUnwind(vm, exec, UnwindFromCallerFrame);
+    VMEntryFrame* vmEntryFrame = vm->topVMEntryFrame;
+    CallFrame* callerFrame = exec->callerFrame(vmEntryFrame);
+    ASSERT(callerFrame);
+
+    NativeCallFrameTracerWithRestore tracer(vm, vmEntryFrame, callerFrame);
+    genericUnwind(vm, callerFrame);
     ASSERT(vm->targetMachinePCForThrow);
 }
 

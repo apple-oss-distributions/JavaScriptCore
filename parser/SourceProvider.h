@@ -49,10 +49,7 @@ namespace JSC {
             return source().substringSharingImpl(start, end - start);
         }
 
-        const String& url() const { return m_url; }
-        const String& sourceURL() const { return m_sourceURLDirective; }
-        const String& sourceMappingURL() const { return m_sourceMappingURLDirective; }
-
+        const String& url() { return m_url; }
         TextPosition startPosition() const { return m_startPosition; }
         intptr_t asID()
         {
@@ -65,17 +62,11 @@ namespace JSC {
         void setValid() { m_validated = true; }
 
     private:
-        template <typename T> friend class Parser;
-
-        void setSourceURLDirective(const String& sourceURL) { m_sourceURLDirective = sourceURL; }
-        void setSourceMappingURLDirective(const String& sourceMappingURL) { m_sourceMappingURLDirective = sourceMappingURL; }
 
         JS_EXPORT_PRIVATE void getID();
         Vector<size_t>& lineStarts();
 
         String m_url;
-        String m_sourceURLDirective;
-        String m_sourceMappingURLDirective;
         TextPosition m_startPosition;
         bool m_validated : 1;
         uintptr_t m_id : sizeof(uintptr_t) * 8 - 1;

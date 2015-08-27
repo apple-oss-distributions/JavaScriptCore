@@ -112,8 +112,7 @@ private:
     """void ObjCInspector${domainName}BackendDispatcher::${commandName}(${parameters})
 {
     id errorCallback = ^(NSString *error) {
-        backendDispatcher()->reportProtocolError(requestId, BackendDispatcher::ServerError, error);
-        backendDispatcher()->sendPendingErrors();
+        backendDispatcher()->sendResponse(callId, InspectorObject::create(), error);
     };
 
 ${successCallback}
