@@ -1,6 +1,6 @@
-2016-08-18  Babak Shafiei  <bshafiei@apple.com>
+2016-08-17  Babak Shafiei  <bshafiei@apple.com>
 
-        Merge r204572.
+        Merge r204572. rdar://problem/27889416
 
     2016-08-17  Geoffrey Garen  <ggaren@apple.com>
 
