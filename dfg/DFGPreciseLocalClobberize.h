@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014, 2015 Apple Inc. All rights reserved.
+ * Copyright (C) 2014-2016 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -42,7 +42,7 @@ public:
         : m_graph(graph)
         , m_node(node)
         , m_read(read)
-        , m_write(write)
+        , m_unconditionalWrite(write)
         , m_def(def)
     {
     }
@@ -70,7 +70,7 @@ public:
         // We expect stack writes to already be precisely characterized by DFG::clobberize().
         if (heap.kind() == Stack) {
             RELEASE_ASSERT(!heap.payload().isTop());
-            callIfAppropriate(m_write, VirtualRegister(heap.payload().value32()));
+            callIfAppropriate(m_unconditionalWrite, VirtualRegister(heap.payload().value32()));
             return;
         }
         
@@ -109,22 +109,30 @@ private:
     {
         switch (m_node->op()) {
         case GetMyArgumentByVal:
+        case GetMyArgumentByValOutOfBounds:
         case ForwardVarargs:
         case CallForwardVarargs:
-        case ConstructForwardVarargs: {
-            InlineCallFrame* inlineCallFrame = m_node->child1()->origin.semantic.inlineCallFrame;
+        case ConstructForwardVarargs:
+        case TailCallForwardVarargs:
+        case TailCallForwardVarargsInlinedCaller: {
+
+            InlineCallFrame* inlineCallFrame;
+            if (m_node->argumentsChild())
+                inlineCallFrame = m_node->argumentsChild()->origin.semantic.inlineCallFrame;
+            else
+                inlineCallFrame = m_node->origin.semantic.inlineCallFrame;
             if (!inlineCallFrame) {
                 // Read the outermost arguments and argument count.
                 for (unsigned i = m_graph.m_codeBlock->numParameters(); i-- > 1;)
                     m_read(virtualRegisterForArgument(i));
-                m_read(VirtualRegister(JSStack::ArgumentCount));
+                m_read(VirtualRegister(CallFrameSlot::argumentCount));
                 break;
             }
             
             for (unsigned i = inlineCallFrame->arguments.size(); i-- > 1;)
                 m_read(VirtualRegister(inlineCallFrame->stackOffset + virtualRegisterForArgument(i).offset()));
             if (inlineCallFrame->isVarargs())
-                m_read(VirtualRegister(inlineCallFrame->stackOffset + JSStack::ArgumentCount));
+                m_read(VirtualRegister(inlineCallFrame->stackOffset + CallFrameSlot::argumentCount));
             break;
         }
             
@@ -134,17 +142,17 @@ private:
                 m_read(virtualRegisterForArgument(i));
         
             // The stack header is read.
-            for (unsigned i = 0; i < JSStack::ThisArgument; ++i)
+            for (unsigned i = 0; i < CallFrameSlot::thisArgument; ++i)
                 m_read(VirtualRegister(i));
         
             // Read all of the inline arguments and call frame headers that we didn't already capture.
-            for (InlineCallFrame* inlineCallFrame = m_node->origin.semantic.inlineCallFrame; inlineCallFrame; inlineCallFrame = inlineCallFrame->caller.inlineCallFrame) {
+            for (InlineCallFrame* inlineCallFrame = m_node->origin.semantic.inlineCallFrame; inlineCallFrame; inlineCallFrame = inlineCallFrame->getCallerInlineFrameSkippingTailCalls()) {
                 for (unsigned i = inlineCallFrame->arguments.size(); i-- > 1;)
                     m_read(VirtualRegister(inlineCallFrame->stackOffset + virtualRegisterForArgument(i).offset()));
                 if (inlineCallFrame->isClosureCall)
-                    m_read(VirtualRegister(inlineCallFrame->stackOffset + JSStack::Callee));
+                    m_read(VirtualRegister(inlineCallFrame->stackOffset + CallFrameSlot::callee));
                 if (inlineCallFrame->isVarargs())
-                    m_read(VirtualRegister(inlineCallFrame->stackOffset + JSStack::ArgumentCount));
+                    m_read(VirtualRegister(inlineCallFrame->stackOffset + CallFrameSlot::argumentCount));
             }
             break;
         } }
@@ -153,7 +161,7 @@ private:
     Graph& m_graph;
     Node* m_node;
     const ReadFunctor& m_read;
-    const WriteFunctor& m_write;
+    const WriteFunctor& m_unconditionalWrite;
     const DefFunctor& m_def;
 };
 

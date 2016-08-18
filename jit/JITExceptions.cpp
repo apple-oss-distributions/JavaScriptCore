@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2012, 2013 Apple Inc. All rights reserved.
+ * Copyright (C) 2012-2013, 2016 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -29,33 +29,50 @@
 #include "CallFrame.h"
 #include "CodeBlock.h"
 #include "Interpreter.h"
-#include "JITStubs.h"
+#include "JSCInlines.h"
 #include "JSCJSValue.h"
 #include "LLIntData.h"
 #include "LLIntOpcode.h"
 #include "LLIntThunks.h"
 #include "Opcode.h"
-#include "JSCInlines.h"
+#include "ShadowChicken.h"
 #include "VM.h"
 
 namespace JSC {
 
-void genericUnwind(VM* vm, ExecState* callFrame)
+void genericUnwind(VM* vm, ExecState* callFrame, UnwindStart unwindStart)
 {
     if (Options::breakOnThrow()) {
-        dataLog("In call frame ", RawPointer(callFrame), " for code block ", *callFrame->codeBlock(), "\n");
+        CodeBlock* codeBlock = callFrame->codeBlock();
+        if (codeBlock)
+            dataLog("In call frame ", RawPointer(callFrame), " for code block ", *codeBlock, "\n");
+        else
+            dataLog("In call frame ", RawPointer(callFrame), " with null CodeBlock\n");
         CRASH();
     }
     
+    ExecState* shadowChickenTopFrame = callFrame;
+    if (unwindStart == UnwindFromCallerFrame) {
+        VMEntryFrame* topVMEntryFrame = vm->topVMEntryFrame;
+        shadowChickenTopFrame = callFrame->callerFrame(topVMEntryFrame);
+    }
+    vm->shadowChicken().log(*vm, shadowChickenTopFrame, ShadowChicken::Packet::throwPacket());
+    
     Exception* exception = vm->exception();
     RELEASE_ASSERT(exception);
-    VMEntryFrame* vmEntryFrame = vm->topVMEntryFrame;
-    HandlerInfo* handler = vm->interpreter->unwind(vmEntryFrame, callFrame, exception); // This may update vmEntryFrame and callFrame.
+    HandlerInfo* handler = vm->interpreter->unwind(*vm, callFrame, exception, unwindStart); // This may update callFrame.
 
     void* catchRoutine;
     Instruction* catchPCForInterpreter = 0;
     if (handler) {
-        catchPCForInterpreter = &callFrame->codeBlock()->instructions()[handler->target];
+        // handler->target is meaningless for getting a code offset when catching
+        // the exception in a DFG/FTL frame. This bytecode target offset could be
+        // something that's in an inlined frame, which means an array access
+        // with this bytecode offset in the machine frame is utterly meaningless
+        // and can cause an overflow. OSR exit properly exits to handler->target
+        // in the proper frame.
+        if (!JITCode::isOptimizingJIT(callFrame->codeBlock()->jitType()))
+            catchPCForInterpreter = &callFrame->codeBlock()->instructions()[handler->target];
 #if ENABLE(JIT)
         catchRoutine = handler->nativeCode.executableAddress();
 #else
@@ -64,8 +81,9 @@ void genericUnwind(VM* vm, ExecState* callFrame)
     } else
         catchRoutine = LLInt::getCodePtr(handleUncaughtException);
     
-    vm->vmEntryFrameForThrow = vmEntryFrame;
-    vm->callFrameForThrow = callFrame;
+    ASSERT(bitwise_cast<uintptr_t>(callFrame) < bitwise_cast<uintptr_t>(vm->topVMEntryFrame));
+
+    vm->callFrameForCatch = callFrame;
     vm->targetMachinePCForThrow = catchRoutine;
     vm->targetInterpreterPCForThrow = catchPCForInterpreter;
     

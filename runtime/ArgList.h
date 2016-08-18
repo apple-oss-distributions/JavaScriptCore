@@ -1,6 +1,6 @@
 /*
  *  Copyright (C) 1999-2001 Harri Porten (porten@kde.org)
- *  Copyright (C) 2003, 2007, 2008, 2009 Apple Inc. All rights reserved.
+ *  Copyright (C) 2003, 2007, 2008, 2009, 2016 Apple Inc. All rights reserved.
  *
  *  This library is free software; you can redistribute it and/or
  *  modify it under the terms of the GNU Library General Public
@@ -57,7 +57,7 @@ public:
             m_markSet->remove(this);
 
         if (EncodedJSValue* base = mallocBase())
-            delete [] base;
+            fastFree(base);
     }
 
     size_t size() const { return m_size; }
@@ -78,7 +78,7 @@ public:
 
     void append(JSValue v)
     {
-        if (m_size >= m_capacity)
+        if (m_size >= m_capacity || mallocBase())
             return slowAppend(v);
 
         slotFor(m_size) = JSValue::encode(v);
@@ -100,6 +100,10 @@ public:
     static void markLists(HeapRootVisitor&, ListSet&);
 
 private:
+    void expandCapacity();
+
+    void addMarkSet(JSValue);
+
     JS_EXPORT_PRIVATE void slowAppend(JSValue);
         
     EncodedJSValue& slotFor(int item) const
@@ -109,7 +113,7 @@ private:
         
     EncodedJSValue* mallocBase()
     {
-        if (m_capacity == static_cast<int>(inlineCapacity))
+        if (m_buffer == m_inlineBuffer)
             return 0;
         return &slotFor(0);
     }
@@ -119,23 +123,6 @@ private:
     EncodedJSValue m_inlineBuffer[inlineCapacity];
     EncodedJSValue* m_buffer;
     ListSet* m_markSet;
-
-private:
-    // Prohibits new / delete, which would break GC.
-    void* operator new(size_t size)
-    {
-        return fastMalloc(size);
-    }
-    void operator delete(void* p)
-    {
-        fastFree(p);
-    }
-
-    void* operator new[](size_t);
-    void operator delete[](void*);
-
-    void* operator new(size_t, void*);
-    void operator delete(void*, size_t);
 };
 
 class ArgList {

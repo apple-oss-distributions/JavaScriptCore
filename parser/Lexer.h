@@ -33,32 +33,6 @@
 
 namespace JSC {
 
-class Keywords {
-public:
-    bool isKeyword(const Identifier& ident) const
-    {
-        return m_keywordTable.entry(ident);
-    }
-    
-    const HashTableValue* getKeyword(const Identifier& ident) const
-    {
-        return m_keywordTable.entry(ident);
-    }
-
-    explicit Keywords(VM&);
-
-    ~Keywords()
-    {
-        m_keywordTable.deleteTable();
-    }
-    
-private:
-    friend class VM;
-    
-    VM& m_vm;
-    const HashTable m_keywordTable;
-};
-
 enum LexerFlags {
     LexerFlagsIgnoreReservedWords = 1, 
     LexerFlagsDontBuildStrings = 2,
@@ -66,6 +40,8 @@ enum LexerFlags {
 };
 
 struct ParsedUnicodeEscapeValue;
+
+bool isLexerKeyword(const Identifier&);
 
 template <typename T>
 class Lexer {
@@ -84,12 +60,9 @@ public:
 
     // Functions to set up parsing.
     void setCode(const SourceCode&, ParserArena*);
-    void setIsReparsing() { m_isReparsing = true; }
-    bool isReparsing() const { return m_isReparsing; }
+    void setIsReparsingFunction() { m_isReparsingFunction = true; }
+    bool isReparsingFunction() const { return m_isReparsingFunction; }
 
-#if ENABLE(ES6_ARROWFUNCTION_SYNTAX)
-    void setTokenPosition(JSToken* tokenRecord);
-#endif
     JSTokenType lex(JSToken*, unsigned, bool strictMode);
     bool nextTokenIsColon();
     int lineNumber() const { return m_lineNumber; }
@@ -100,20 +73,22 @@ public:
         return JSTextPosition(m_lineNumber, currentOffset(), currentLineStartOffset());
     }
     JSTextPosition positionBeforeLastNewline() const { return m_positionBeforeLastNewline; }
-    JSTokenLocation lastTokenLocation() const { return m_lastTockenLocation; }
+    JSTokenLocation lastTokenLocation() const { return m_lastTokenLocation; }
     void setLastLineNumber(int lastLineNumber) { m_lastLineNumber = lastLineNumber; }
     int lastLineNumber() const { return m_lastLineNumber; }
     bool prevTerminator() const { return m_terminator; }
     bool scanRegExp(const Identifier*& pattern, const Identifier*& flags, UChar patternPrefix = 0);
-#if ENABLE(ES6_TEMPLATE_LITERAL_SYNTAX)
     enum class RawStringsBuildMode { BuildRawStrings, DontBuildRawStrings };
     JSTokenType scanTrailingTemplateString(JSToken*, RawStringsBuildMode);
-#endif
     bool skipRegExp();
 
     // Functions for use after parsing.
     bool sawError() const { return m_error; }
+    void setSawError(bool sawError) { m_error = sawError; }
     String getErrorMessage() const { return m_lexErrorMessage; }
+    void setErrorMessage(const String& errorMessage) { m_lexErrorMessage = errorMessage; }
+    String sourceURL() const { return m_sourceURLDirective; }
+    String sourceMappingURL() const { return m_sourceMappingURLDirective; }
     void clear();
     void setOffset(int offset, int lineStartOffset)
     {
@@ -140,8 +115,6 @@ public:
         m_terminator = terminator;
     }
 
-    SourceProvider* sourceProvider() const { return m_source->provider(); }
-
     JSTokenType lexExpectIdentifier(JSToken*, unsigned, bool strictMode);
 
 private:
@@ -167,7 +140,7 @@ private:
     ALWAYS_INLINE const T* currentSourcePtr() const;
     ALWAYS_INLINE void setOffsetFromSourcePtr(const T* sourcePtr, unsigned lineStartOffset) { setOffset(offsetFromSourcePtr(sourcePtr), lineStartOffset); }
 
-    ALWAYS_INLINE void setCodeStart(const StringImpl*);
+    ALWAYS_INLINE void setCodeStart(const StringView&);
 
     ALWAYS_INLINE const Identifier* makeIdentifier(const LChar* characters, size_t length);
     ALWAYS_INLINE const Identifier* makeIdentifier(const UChar* characters, size_t length);
@@ -178,6 +151,8 @@ private:
     ALWAYS_INLINE const Identifier* makeEmptyIdentifier();
 
     ALWAYS_INLINE bool lastTokenWasRestrKeyword() const;
+    
+    ALWAYS_INLINE void skipWhitespace();
 
     template <int shiftAmount> void internalShift();
     template <bool shouldCreateIdentifier> ALWAYS_INLINE JSTokenType parseKeyword(JSTokenData*);
@@ -193,9 +168,7 @@ private:
 
     enum class EscapeParseMode { Template, String };
     template <bool shouldBuildStrings> ALWAYS_INLINE StringParseResult parseComplexEscape(EscapeParseMode, bool strictMode, T stringQuoteCharacter);
-#if ENABLE(ES6_TEMPLATE_LITERAL_SYNTAX)
     template <bool shouldBuildStrings> ALWAYS_INLINE StringParseResult parseTemplateLiteral(JSTokenData*, RawStringsBuildMode);
-#endif
     ALWAYS_INLINE void parseHex(double& returnValue);
     ALWAYS_INLINE bool parseBinary(double& returnValue);
     ALWAYS_INLINE bool parseOctal(double& returnValue);
@@ -203,6 +176,12 @@ private:
     ALWAYS_INLINE void parseNumberAfterDecimalPoint();
     ALWAYS_INLINE bool parseNumberAfterExponentIndicator();
     ALWAYS_INLINE bool parseMultilineComment();
+
+    ALWAYS_INLINE void parseCommentDirective();
+    ALWAYS_INLINE String parseCommentDirectiveValue();
+
+    template <unsigned length>
+    ALWAYS_INLINE bool consume(const char (&input)[length]);
 
     static const size_t initialReadBufferCapacity = 32;
 
@@ -223,11 +202,14 @@ private:
     const T* m_codeStartPlusOffset;
     const T* m_lineStart;
     JSTextPosition m_positionBeforeLastNewline;
-    JSTokenLocation m_lastTockenLocation;
-    bool m_isReparsing;
+    JSTokenLocation m_lastTokenLocation;
+    bool m_isReparsingFunction;
     bool m_atLineStart;
     bool m_error;
     String m_lexErrorMessage;
+
+    String m_sourceURLDirective;
+    String m_sourceMappingURLDirective;
 
     T m_current;
 
@@ -308,17 +290,17 @@ ALWAYS_INLINE const Identifier* Lexer<T>::makeEmptyIdentifier()
 }
 
 template <>
-ALWAYS_INLINE void Lexer<LChar>::setCodeStart(const StringImpl* sourceString)
+ALWAYS_INLINE void Lexer<LChar>::setCodeStart(const StringView& sourceString)
 {
-    ASSERT(sourceString->is8Bit());
-    m_codeStart = sourceString->characters8();
+    ASSERT(sourceString.is8Bit());
+    m_codeStart = sourceString.characters8();
 }
 
 template <>
-ALWAYS_INLINE void Lexer<UChar>::setCodeStart(const StringImpl* sourceString)
+ALWAYS_INLINE void Lexer<UChar>::setCodeStart(const StringView& sourceString)
 {
-    ASSERT(!sourceString->is8Bit());
-    m_codeStart = sourceString->characters16();
+    ASSERT(!sourceString.is8Bit());
+    m_codeStart = sourceString.characters16();
 }
 
 template <typename T>

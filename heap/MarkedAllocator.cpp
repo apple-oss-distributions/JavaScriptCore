@@ -59,6 +59,13 @@ bool MarkedAllocator::isPagedOut(double deadline)
     return false;
 }
 
+void MarkedAllocator::retire(MarkedBlock* block, MarkedBlock::FreeList& freeList)
+{
+    m_blockList.remove(block);
+    m_retiredBlocks.push(block);
+    block->didRetireBlock(freeList);
+}
+
 inline void* MarkedAllocator::tryAllocateHelper(size_t bytes)
 {
     if (m_currentBlock) {
@@ -76,9 +83,7 @@ inline void* MarkedAllocator::tryAllocateHelper(size_t bytes)
         double utilization = ((double)MarkedBlock::blockSize - (double)freeList.bytes) / (double)MarkedBlock::blockSize;
         if (utilization >= Options::minMarkedBlockUtilization()) {
             ASSERT(freeList.bytes || !freeList.head);
-            m_blockList.remove(block);
-            m_retiredBlocks.push(block);
-            block->didRetireBlock(freeList);
+            retire(block, freeList);
             continue;
         }
 
@@ -175,12 +180,13 @@ void* MarkedAllocator::allocateSlowCase(size_t bytes)
 MarkedBlock* MarkedAllocator::allocateBlock(size_t bytes)
 {
     size_t minBlockSize = MarkedBlock::blockSize;
-    size_t minAllocationSize = WTF::roundUpToMultipleOf(WTF::pageSize(), sizeof(MarkedBlock) + bytes);
+    size_t minAllocationSize = WTF::roundUpToMultipleOf<MarkedBlock::atomSize>(sizeof(MarkedBlock)) + WTF::roundUpToMultipleOf<MarkedBlock::atomSize>(bytes);
+    minAllocationSize = WTF::roundUpToMultipleOf(WTF::pageSize(), minAllocationSize);
     size_t blockSize = std::max(minBlockSize, minAllocationSize);
 
     size_t cellSize = m_cellSize ? m_cellSize : WTF::roundUpToMultipleOf<MarkedBlock::atomSize>(bytes);
 
-    return MarkedBlock::create(this, blockSize, cellSize, m_needsDestruction);
+    return MarkedBlock::create(*m_heap, this, blockSize, cellSize, m_needsDestruction);
 }
 
 void MarkedAllocator::addBlock(MarkedBlock* block)
@@ -215,6 +221,16 @@ void MarkedAllocator::reset()
         m_blockList.append(m_retiredBlocks);
 
     m_nextBlockToSweep = m_blockList.head();
+
+    if (UNLIKELY(Options::useImmortalObjects())) {
+        MarkedBlock* next;
+        for (MarkedBlock*& block = m_nextBlockToSweep; block; block = next) {
+            next = block->next();
+
+            MarkedBlock::FreeList freeList = block->sweep(MarkedBlock::SweepToFreeList);
+            retire(block, freeList);
+        }
+    }
 }
 
 struct LastChanceToFinalize : MarkedBlock::VoidFunctor {
