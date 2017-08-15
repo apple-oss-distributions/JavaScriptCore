@@ -1,6 +1,6 @@
 /*
  *  Copyright (C) 1999-2000 Harri Porten (porten@kde.org)
- *  Copyright (C) 2003, 2007-2009, 2011, 2013, 2015-2017 Apple Inc. All rights reserved.
+ *  Copyright (C) 2003-2017 Apple Inc. All rights reserved.
  *  Copyright (C) 2003 Peter Kelly (pmk@post.com)
  *  Copyright (C) 2006 Alexey Proskuryakov (ap@nypop.com)
  *
@@ -62,7 +62,7 @@ EncodedJSValue JSC_HOST_CALL arrayProtoFuncLastIndexOf(ExecState*);
 
 // ------------------------------ ArrayPrototype ----------------------------
 
-const ClassInfo ArrayPrototype::s_info = {"Array", &JSArray::s_info, nullptr, CREATE_METHOD_TABLE(ArrayPrototype)};
+const ClassInfo ArrayPrototype::s_info = {"Array", &JSArray::s_info, nullptr, nullptr, CREATE_METHOD_TABLE(ArrayPrototype)};
 
 ArrayPrototype* ArrayPrototype::create(VM& vm, JSGlobalObject* globalObject, Structure* structure)
 {
@@ -81,7 +81,7 @@ ArrayPrototype::ArrayPrototype(VM& vm, Structure* structure)
 void ArrayPrototype::finishCreation(VM& vm, JSGlobalObject* globalObject)
 {
     Base::finishCreation(vm);
-    ASSERT(inherits(info()));
+    ASSERT(inherits(vm, info()));
     vm.prototypeMap.addPrototype(this);
 
     putDirectWithoutTransition(vm, vm.propertyNames->toString, globalObject->arrayProtoToStringFunction(), DontEnum);
@@ -105,7 +105,7 @@ void ArrayPrototype::finishCreation(VM& vm, JSGlobalObject* globalObject)
     JSC_BUILTIN_FUNCTION_WITHOUT_TRANSITION("every", arrayPrototypeEveryCodeGenerator, DontEnum);
     JSC_BUILTIN_FUNCTION_WITHOUT_TRANSITION("forEach", arrayPrototypeForEachCodeGenerator, DontEnum);
     JSC_BUILTIN_FUNCTION_WITHOUT_TRANSITION("some", arrayPrototypeSomeCodeGenerator, DontEnum);
-    JSC_NATIVE_FUNCTION_WITHOUT_TRANSITION("indexOf", arrayProtoFuncIndexOf, DontEnum, 1);
+    JSC_NATIVE_INTRINSIC_FUNCTION_WITHOUT_TRANSITION("indexOf", arrayProtoFuncIndexOf, DontEnum, 1, ArrayIndexOfIntrinsic);
     JSC_NATIVE_FUNCTION_WITHOUT_TRANSITION("lastIndexOf", arrayProtoFuncLastIndexOf, DontEnum, 1);
     JSC_BUILTIN_FUNCTION_WITHOUT_TRANSITION("filter", arrayPrototypeFilterCodeGenerator, DontEnum);
     JSC_BUILTIN_FUNCTION_WITHOUT_TRANSITION("reduce", arrayPrototypeReduceCodeGenerator, DontEnum);
@@ -448,8 +448,7 @@ EncodedJSValue JSC_HOST_CALL arrayProtoFuncToLocaleString(ExecState* exec)
 
     JSObject* thisObject = thisValue.toObject(exec);
     RETURN_IF_EXCEPTION(scope, encodedJSValue());
-
-    unsigned length = getLength(exec, thisObject);
+    unsigned length = toLength(exec, thisObject);
     RETURN_IF_EXCEPTION(scope, encodedJSValue());
 
     StringRecursionChecker checker(exec, thisObject);
@@ -713,7 +712,7 @@ EncodedJSValue JSC_HOST_CALL arrayProtoFuncJoin(ExecState* exec)
         return JSValue::encode(slowJoin(*exec, thisObject, jsSeparator, length64));
     }
 
-    auto viewWithString = jsSeparator->viewWithUnderlyingString(*exec);
+    auto viewWithString = jsSeparator->viewWithUnderlyingString(exec);
     RETURN_IF_EXCEPTION(scope, encodedJSValue());
 
     scope.release();
@@ -736,7 +735,7 @@ EncodedJSValue JSC_HOST_CALL arrayProtoFuncPop(ExecState* exec)
     ASSERT(!!scope.exception() == !thisObj);
     if (UNLIKELY(!thisObj))
         return encodedJSValue();
-    unsigned length = getLength(exec, thisObj);
+    unsigned length = toLength(exec, thisObj);
     RETURN_IF_EXCEPTION(scope, encodedJSValue());
 
     if (length == 0) {
@@ -775,7 +774,7 @@ EncodedJSValue JSC_HOST_CALL arrayProtoFuncPush(ExecState* exec)
     ASSERT(!!scope.exception() == !thisObj);
     if (UNLIKELY(!thisObj))
         return encodedJSValue();
-    unsigned length = getLength(exec, thisObj);
+    unsigned length = toLength(exec, thisObj);
     RETURN_IF_EXCEPTION(scope, encodedJSValue());
 
     for (unsigned n = 0; n < exec->argumentCount(); n++) {
@@ -806,7 +805,7 @@ EncodedJSValue JSC_HOST_CALL arrayProtoFuncReverse(ExecState* exec)
     if (UNLIKELY(!thisObject))
         return encodedJSValue();
 
-    unsigned length = getLength(exec, thisObject);
+    unsigned length = toLength(exec, thisObject);
     RETURN_IF_EXCEPTION(scope, encodedJSValue());
 
     switch (thisObject->indexingType()) {
@@ -897,7 +896,7 @@ EncodedJSValue JSC_HOST_CALL arrayProtoFuncShift(ExecState* exec)
     ASSERT(!!scope.exception() == !thisObj);
     if (UNLIKELY(!thisObj))
         return encodedJSValue();
-    unsigned length = getLength(exec, thisObj);
+    unsigned length = toLength(exec, thisObj);
     RETURN_IF_EXCEPTION(scope, encodedJSValue());
 
     if (length == 0) {
@@ -924,13 +923,15 @@ EncodedJSValue JSC_HOST_CALL arrayProtoFuncSlice(ExecState* exec)
     ASSERT(!!scope.exception() == !thisObj);
     if (UNLIKELY(!thisObj))
         return { };
-    unsigned length = getLength(exec, thisObj);
+    unsigned length = toLength(exec, thisObj);
     RETURN_IF_EXCEPTION(scope, { });
 
     unsigned begin = argumentClampedIndexFromStartOrEnd(exec, 0, length);
     RETURN_IF_EXCEPTION(scope, { });
     unsigned end = argumentClampedIndexFromStartOrEnd(exec, 1, length, length);
     RETURN_IF_EXCEPTION(scope, { });
+    if (end < begin)
+        end = begin;
 
     std::pair<SpeciesConstructResult, JSObject*> speciesResult = speciesConstructArray(exec, thisObj, end - begin);
     // We can only get an exception if we call some user function.
@@ -938,7 +939,7 @@ EncodedJSValue JSC_HOST_CALL arrayProtoFuncSlice(ExecState* exec)
     if (UNLIKELY(speciesResult.first == SpeciesConstructResult::Exception))
         return { };
 
-    bool okToDoFastPath = speciesResult.first == SpeciesConstructResult::FastPath && isJSArray(thisObj) && length == getLength(exec, thisObj);
+    bool okToDoFastPath = speciesResult.first == SpeciesConstructResult::FastPath && isJSArray(thisObj) && length == toLength(exec, thisObj);
     RETURN_IF_EXCEPTION(scope, { });
     if (LIKELY(okToDoFastPath)) {
         if (JSArray* result = asArray(thisObj)->fastSlice(*exec, begin, end - begin))
@@ -978,7 +979,7 @@ EncodedJSValue JSC_HOST_CALL arrayProtoFuncSplice(ExecState* exec)
     ASSERT(!!scope.exception() == !thisObj);
     if (UNLIKELY(!thisObj))
         return encodedJSValue();
-    unsigned length = getLength(exec, thisObj);
+    unsigned length = toLength(exec, thisObj);
     RETURN_IF_EXCEPTION(scope, encodedJSValue());
 
     if (!exec->argumentCount()) {
@@ -1023,35 +1024,28 @@ EncodedJSValue JSC_HOST_CALL arrayProtoFuncSplice(ExecState* exec)
         return JSValue::encode(jsUndefined());
 
     JSObject* result = nullptr;
-    bool okToDoFastPath = speciesResult.first == SpeciesConstructResult::FastPath && isJSArray(thisObj) && length == getLength(exec, thisObj);
+    bool okToDoFastPath = speciesResult.first == SpeciesConstructResult::FastPath && isJSArray(thisObj) && length == toLength(exec, thisObj);
     RETURN_IF_EXCEPTION(scope, encodedJSValue());
     if (LIKELY(okToDoFastPath))
         result = asArray(thisObj)->fastSlice(*exec, actualStart, actualDeleteCount);
 
     if (!result) {
-        if (speciesResult.first == SpeciesConstructResult::CreatedObject) {
+        if (speciesResult.first == SpeciesConstructResult::CreatedObject)
             result = speciesResult.second;
-            
-            for (unsigned k = 0; k < actualDeleteCount; ++k) {
-                JSValue v = getProperty(exec, thisObj, k + actualStart);
-                RETURN_IF_EXCEPTION(scope, encodedJSValue());
-                if (UNLIKELY(!v))
-                    continue;
-                result->putByIndexInline(exec, k, v, true);
-                RETURN_IF_EXCEPTION(scope, encodedJSValue());
+        else {
+            result = JSArray::tryCreate(vm, exec->lexicalGlobalObject()->arrayStructureForIndexingTypeDuringAllocation(ArrayWithUndecided), actualDeleteCount);
+            if (UNLIKELY(!result)) {
+                throwOutOfMemoryError(exec, scope);
+                return encodedJSValue();
             }
-        } else {
-            result = JSArray::tryCreateUninitialized(vm, exec->lexicalGlobalObject()->arrayStructureForIndexingTypeDuringAllocation(ArrayWithUndecided), actualDeleteCount);
-            if (!result)
-                return JSValue::encode(throwOutOfMemoryError(exec, scope));
-            
-            for (unsigned k = 0; k < actualDeleteCount; ++k) {
-                JSValue v = getProperty(exec, thisObj, k + actualStart);
-                RETURN_IF_EXCEPTION(scope, encodedJSValue());
-                if (UNLIKELY(!v))
-                    continue;
-                result->initializeIndex(vm, k, v);
-            }
+        }
+        for (unsigned k = 0; k < actualDeleteCount; ++k) {
+            JSValue v = getProperty(exec, thisObj, k + actualStart);
+            RETURN_IF_EXCEPTION(scope, encodedJSValue());
+            if (UNLIKELY(!v))
+                continue;
+            result->putDirectIndex(exec, k, v, 0, PutDirectIndexShouldThrow);
+            RETURN_IF_EXCEPTION(scope, encodedJSValue());
         }
     }
 
@@ -1083,11 +1077,14 @@ EncodedJSValue JSC_HOST_CALL arrayProtoFuncUnShift(ExecState* exec)
     ASSERT(!!scope.exception() == !thisObj);
     if (UNLIKELY(!thisObj))
         return encodedJSValue();
-    unsigned length = getLength(exec, thisObj);
+    double doubleLength = toLength(exec, thisObj);
+    unsigned length = doubleLength;
     RETURN_IF_EXCEPTION(scope, encodedJSValue());
 
     unsigned nrArgs = exec->argumentCount();
     if (nrArgs) {
+        if (UNLIKELY(doubleLength + static_cast<double>(nrArgs) > maxSafeInteger()))
+            return throwVMTypeError(exec, scope, ASCIILiteral("Cannot shift to offset greater than (2 ** 53) - 1"));
         unshift<JSArray::ShiftCountForShift>(exec, thisObj, 0, 0, nrArgs, length);
         RETURN_IF_EXCEPTION(scope, encodedJSValue());
     }
@@ -1111,7 +1108,7 @@ EncodedJSValue JSC_HOST_CALL arrayProtoFuncIndexOf(ExecState* exec)
     ASSERT(!!scope.exception() == !thisObj);
     if (UNLIKELY(!thisObj))
         return encodedJSValue();
-    unsigned length = getLength(exec, thisObj);
+    unsigned length = toLength(exec, thisObj);
     RETURN_IF_EXCEPTION(scope, encodedJSValue());
 
     unsigned index = argumentClampedIndexFromStartOrEnd(exec, 1, length);
@@ -1139,7 +1136,7 @@ EncodedJSValue JSC_HOST_CALL arrayProtoFuncLastIndexOf(ExecState* exec)
     ASSERT(!!scope.exception() == !thisObj);
     if (UNLIKELY(!thisObj))
         return encodedJSValue();
-    unsigned length = getLength(exec, thisObj);
+    unsigned length = toLength(exec, thisObj);
     if (UNLIKELY(scope.exception()) || !length)
         return JSValue::encode(jsNumber(-1));
 
@@ -1205,15 +1202,25 @@ static EncodedJSValue concatAppendOne(ExecState* exec, VM& vm, JSArray* first, J
     Butterfly* firstButterfly = first->butterfly();
     unsigned firstArraySize = firstButterfly->publicLength();
 
+    Checked<unsigned, RecordOverflow> checkedResultSize = firstArraySize;
+    checkedResultSize += 1;
+    if (UNLIKELY(checkedResultSize.hasOverflowed())) {
+        throwOutOfMemoryError(exec, scope);
+        return encodedJSValue();
+    }
+
+    unsigned resultSize = checkedResultSize.unsafeGet();
     IndexingType type = first->mergeIndexingTypeForCopying(indexingTypeForValue(second) | IsArray);
     
     if (type == NonArray)
         type = first->indexingType();
 
     Structure* resultStructure = exec->lexicalGlobalObject()->arrayStructureForIndexingTypeDuringAllocation(type);
-    JSArray* result = JSArray::create(vm, resultStructure, firstArraySize + 1);
-    if (!result)
-        return JSValue::encode(throwOutOfMemoryError(exec, scope));
+    JSArray* result = JSArray::create(vm, resultStructure, resultSize);
+    if (UNLIKELY(!result)) {
+        throwOutOfMemoryError(exec, scope);
+        return encodedJSValue();
+    }
 
     bool success = result->appendMemcpy(exec, vm, 0, first);
     ASSERT(!success || !scope.exception());
@@ -1266,10 +1273,20 @@ EncodedJSValue JSC_HOST_CALL arrayProtoPrivateFuncConcatMemcpy(ExecState* exec)
     unsigned firstArraySize = firstButterfly->publicLength();
     unsigned secondArraySize = secondButterfly->publicLength();
 
+    Checked<unsigned, RecordOverflow> checkedResultSize = firstArraySize;
+    checkedResultSize += secondArraySize;
+
+    if (UNLIKELY(checkedResultSize.hasOverflowed())) {
+        throwOutOfMemoryError(exec, scope);
+        return encodedJSValue();
+    }
+
+    unsigned resultSize = checkedResultSize.unsafeGet();
+    IndexingType firstType = firstArray->indexingType();
     IndexingType secondType = secondArray->indexingType();
     IndexingType type = firstArray->mergeIndexingTypeForCopying(secondType);
-    if (type == NonArray || !firstArray->canFastCopy(vm, secondArray) || firstArraySize + secondArraySize >= MIN_SPARSE_ARRAY_INDEX) {
-        JSArray* result = constructEmptyArray(exec, nullptr, firstArraySize + secondArraySize);
+    if (type == NonArray || !firstArray->canFastCopy(vm, secondArray) || resultSize >= MIN_SPARSE_ARRAY_INDEX) {
+        JSArray* result = constructEmptyArray(exec, nullptr, resultSize);
         RETURN_IF_EXCEPTION(scope, encodedJSValue());
 
         bool success = moveElements(exec, vm, result, 0, firstArray, firstArraySize);
@@ -1284,10 +1301,18 @@ EncodedJSValue JSC_HOST_CALL arrayProtoPrivateFuncConcatMemcpy(ExecState* exec)
         return JSValue::encode(result);
     }
 
-    Structure* resultStructure = exec->lexicalGlobalObject()->arrayStructureForIndexingTypeDuringAllocation(type);
-    JSArray* result = JSArray::tryCreateUninitialized(vm, resultStructure, firstArraySize + secondArraySize);
-    if (!result)
-        return JSValue::encode(throwOutOfMemoryError(exec, scope));
+    JSGlobalObject* lexicalGlobalObject = exec->lexicalGlobalObject();
+    Structure* resultStructure = lexicalGlobalObject->arrayStructureForIndexingTypeDuringAllocation(type);
+    if (UNLIKELY(hasAnyArrayStorage(resultStructure->indexingType())))
+        return JSValue::encode(jsNull());
+
+    ASSERT(!lexicalGlobalObject->isHavingABadTime());
+    ObjectInitializationScope initializationScope(vm);
+    JSArray* result = JSArray::tryCreateUninitializedRestricted(initializationScope, resultStructure, resultSize);
+    if (UNLIKELY(!result)) {
+        throwOutOfMemoryError(exec, scope);
+        return encodedJSValue();
+    }
     
     if (type == ArrayWithDouble) {
         double* buffer = result->butterfly()->contiguousDouble().data();
@@ -1295,16 +1320,22 @@ EncodedJSValue JSC_HOST_CALL arrayProtoPrivateFuncConcatMemcpy(ExecState* exec)
         memcpy(buffer + firstArraySize, secondButterfly->contiguousDouble().data(), sizeof(JSValue) * secondArraySize);
     } else if (type != ArrayWithUndecided) {
         WriteBarrier<Unknown>* buffer = result->butterfly()->contiguous().data();
-        memcpy(buffer, firstButterfly->contiguous().data(), sizeof(JSValue) * firstArraySize);
-        if (secondType != ArrayWithUndecided)
-            memcpy(buffer + firstArraySize, secondButterfly->contiguous().data(), sizeof(JSValue) * secondArraySize);
-        else {
-            for (unsigned i = secondArraySize; i--;)
-                buffer[i + firstArraySize].clear();
-        }
+        
+        auto copy = [&] (unsigned offset, void* source, unsigned size, IndexingType type) {
+            if (type != ArrayWithUndecided) {
+                memcpy(buffer + offset, source, sizeof(JSValue) * size);
+                return;
+            }
+            
+            for (unsigned i = size; i--;)
+                buffer[i + offset].clear();
+        };
+        
+        copy(0, firstButterfly->contiguous().data(), firstArraySize, firstType);
+        copy(firstArraySize, secondButterfly->contiguous().data(), secondArraySize, secondType);
     }
 
-    result->butterfly()->setPublicLength(firstArraySize + secondArraySize);
+    result->butterfly()->setPublicLength(resultSize);
     return JSValue::encode(result);
 }
 
@@ -1373,7 +1404,7 @@ void ArrayPrototype::tryInitializeSpeciesWatchpoint(ExecState* exec)
 
     PropertySlot constructorSlot(this, PropertySlot::InternalMethodType::VMInquiry);
     this->getOwnPropertySlot(this, exec, vm.propertyNames->constructor, constructorSlot);
-    ASSERT_UNUSED(scope, !scope.exception());
+    scope.assertNoException();
     if (constructorSlot.slotBase() != this
         || !constructorSlot.isCacheableValue()
         || constructorSlot.getValue(exec, vm.propertyNames->constructor) != arrayConstructor) {
@@ -1387,7 +1418,7 @@ void ArrayPrototype::tryInitializeSpeciesWatchpoint(ExecState* exec)
 
     PropertySlot speciesSlot(arrayConstructor, PropertySlot::InternalMethodType::VMInquiry);
     arrayConstructor->getOwnPropertySlot(arrayConstructor, exec, vm.propertyNames->speciesSymbol, speciesSlot);
-    ASSERT_UNUSED(scope, !scope.exception());
+    scope.assertNoException();
     if (speciesSlot.slotBase() != arrayConstructor
         || !speciesSlot.isCacheableGetter()
         || speciesSlot.getterSetter() != globalObject->speciesGetterSetter()) {

@@ -27,7 +27,6 @@
 #include "InternalFunction.h"
 #include "JSCallee.h"
 #include "JSScope.h"
-#include "Watchpoint.h"
 
 namespace JSC {
 
@@ -65,7 +64,7 @@ public:
     typedef JSCallee Base;
     const static unsigned StructureFlags = Base::StructureFlags | OverridesGetOwnPropertySlot | OverridesGetPropertyNames;
 
-    static size_t allocationSize(size_t inlineCapacity)
+    static size_t allocationSize(Checked<size_t> inlineCapacity)
     {
         ASSERT_UNUSED(inlineCapacity, !inlineCapacity);
         return sizeof(JSFunction);
