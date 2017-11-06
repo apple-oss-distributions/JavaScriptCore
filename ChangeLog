@@ -1,6 +1,6 @@
 2017-11-06  Jason Marcell  <jmarcell@apple.com>
 
-        Cherry-pick r224426. rdar://problem/35364681
+        Cherry-pick r224426. rdar://problem/35364675
 
     2017-11-03  Michael Saboff  <msaboff@apple.com>
 
@@ -17,7 +17,33 @@
 
 2017-11-05  Jason Marcell  <jmarcell@apple.com>
 
-        Cherry-pick r224416. rdar://problem/35296415
+        Cherry-pick r224416. rdar://problem/35296413
+
+    2017-11-03  Keith Miller  <keith_miller@apple.com>
+
+            PutProperytSlot should inform the IC about the property before effects.
+            https://bugs.webkit.org/show_bug.cgi?id=179262
+
+            Reviewed by Mark Lam.
+
+            This patch fixes an issue where we choose to cache setters based on
+            incorrect information. If we did so we might end up OSR exiting
+            more than we would otherwise need to. The new model is that the
+            PutPropertySlot should inform the IC of what the property looked
+            like before any potential side effects might have occurred.
+
+            * runtime/JSObject.cpp:
+            (JSC::JSObject::putInlineSlow):
+            * runtime/Lookup.h:
+            (JSC::putEntry):
+
+2017-11-05  Jason Marcell  <jmarcell@apple.com>
+
+        Revert r224473. rdar://problem/35296413
+
+2017-11-05  Jason Marcell  <jmarcell@apple.com>
+
+        Cherry-pick r224416. rdar://problem/35296413
 
     2017-11-03  Keith Miller  <keith_miller@apple.com>
 
@@ -39,7 +65,7 @@
 
 2017-11-02  Jason Marcell  <jmarcell@apple.com>
 
-        Cherry-pick r224366. rdar://problem/35329722
+        Cherry-pick r224366. rdar://problem/35329720
 
     2017-11-02  Michael Saboff  <msaboff@apple.com>
 
@@ -56,7 +82,7 @@
 
 2017-11-02  Jason Marcell  <jmarcell@apple.com>
 
-        Cherry-pick r224349. rdar://problem/35329729
+        Cherry-pick r224349. rdar://problem/35329727
 
     2017-11-02  Filip Pizlo  <fpizlo@apple.com>
 
@@ -72,7 +98,7 @@
 
 2017-11-02  Jason Marcell  <jmarcell@apple.com>
 
-        Cherry-pick r224302. rdar://problem/35296412
+        Cherry-pick r224302. rdar://problem/35296408
 
     2017-11-01  Michael Saboff  <msaboff@apple.com>
 
