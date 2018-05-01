@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2018 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -20,17 +20,37 @@
  * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
  * OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#pragma once
+#include "config.h"
+#include "DFGAbstractInterpreterClobberState.h"
 
-#include "ConstructAbility.h"
-#include "ParserModes.h"
-#include "SourceCode.h"
+#if ENABLE(DFG_JIT)
 
-namespace JSC {
+#include <wtf/PrintStream.h>
 
-JS_EXPORT_PRIVATE UnlinkedFunctionExecutable* createBuiltinExecutable(VM&, const SourceCode&, const Identifier&, ConstructorKind, ConstructAbility);
+namespace WTF {
 
-} // namespace JSC
+void printInternal(PrintStream& out, JSC::DFG::AbstractInterpreterClobberState clobberState)
+{
+    switch (clobberState) {
+    case JSC::DFG::AbstractInterpreterClobberState::NotClobbered:
+        out.print("NotClobbered");
+        return;
+    case JSC::DFG::AbstractInterpreterClobberState::FoldedClobber:
+        out.print("FoldedClobber");
+        return;
+    case JSC::DFG::AbstractInterpreterClobberState::ObservedTransitions:
+        out.print("ObservedTransitions");
+        return;
+    case JSC::DFG::AbstractInterpreterClobberState::ClobberedStructures:
+        out.print("ClobberedStructures");
+        return;
+    }
+    RELEASE_ASSERT_NOT_REACHED();
+}
+
+} // namespace WTF
+
+#endif // ENABLE(DFG_JIT)
