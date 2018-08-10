@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015 Apple Inc. All rights reserved.
+ * Copyright (C) 2015-2018 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -67,7 +67,8 @@ public:
     }
 
     bool isValidAndWatchable() const;
-    
+
+    size_t size() const { return m_data ? m_data->vector.size() : 0; }
     bool isEmpty() const
     {
         return !m_data;
@@ -165,6 +166,12 @@ ObjectPropertyConditionSet generateConditionsForPropertySetterMiss(
 ObjectPropertyConditionSet generateConditionsForPrototypePropertyHit(
     VM&, JSCell* owner, ExecState*, Structure* headStructure, JSObject* prototype,
     UniquedStringImpl* uid);
+ObjectPropertyConditionSet generateConditionsForPrototypePropertyHitCustom(
+    VM&, JSCell* owner, ExecState*, Structure* headStructure, JSObject* prototype,
+    UniquedStringImpl* uid);
+
+ObjectPropertyConditionSet generateConditionsForInstanceOf(
+    VM&, JSCell* owner, ExecState*, Structure* headStructure, JSObject* prototype, bool shouldHit);
 
 ObjectPropertyConditionSet generateConditionsForPrototypeEquivalenceConcurrently(
     VM&, JSGlobalObject*, Structure* headStructure, JSObject* prototype,

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013-2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2013-2018 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -70,6 +70,7 @@ public:
         case StringUse:
         case StringOrOtherUse:
         case SymbolUse:
+        case BigIntUse:
         case StringObjectUse:
         case StringOrStringObjectUse:
         case NotStringVarUse:
@@ -133,14 +134,14 @@ private:
 // safely execute before that check, so long as that check continues to guard any
 // user-observable things done to the loaded value.
 template<typename AbstractStateType>
-bool safeToExecute(AbstractStateType& state, Graph& graph, Node* node)
+bool safeToExecute(AbstractStateType& state, Graph& graph, Node* node, bool ignoreEmptyChildren = false)
 {
     SafeToExecuteEdge<AbstractStateType> safeToExecuteEdge(state);
     DFG_NODE_DO_TO_CHILDREN(graph, node, safeToExecuteEdge);
     if (!safeToExecuteEdge.result())
         return false;
 
-    if (safeToExecuteEdge.maySeeEmptyChild()) {
+    if (!ignoreEmptyChildren && safeToExecuteEdge.maySeeEmptyChild()) {
         // We conservatively assume if the empty value flows into a node,
         // it might not be able to handle it (e.g, crash). In general, the bytecode generator
         // emits code in such a way that most node types don't need to worry about the empty value
@@ -170,7 +171,9 @@ bool safeToExecute(AbstractStateType& state, Graph& graph, Node* node)
     case IdentityWithProfile:
     case ToThis:
     case CreateThis:
+    case ObjectCreate:
     case GetCallee:
+    case SetCallee:
     case GetArgumentCountIncludingThis:
     case SetArgumentCountIncludingThis:
     case GetRestLength:
@@ -217,6 +220,7 @@ bool safeToExecute(AbstractStateType& state, Graph& graph, Node* node)
     case ArithCeil:
     case ArithTrunc:
     case ArithUnary:
+    case ValueNegate:
     case ValueAdd:
     case TryGetById:
     case DeleteById:
@@ -225,6 +229,8 @@ bool safeToExecute(AbstractStateType& state, Graph& graph, Node* node)
     case GetByIdWithThis:
     case GetByValWithThis:
     case GetByIdFlush:
+    case GetByIdDirect:
+    case GetByIdDirectFlush:
     case PutById:
     case PutByIdFlush:
     case PutByIdWithThis:
@@ -262,7 +268,10 @@ bool safeToExecute(AbstractStateType& state, Graph& graph, Node* node)
     case AssertNotEmpty:
     case CheckStringIdent:
     case RegExpExec:
+    case RegExpExecNonGlobalOrSticky:
     case RegExpTest:
+    case RegExpMatchFast:
+    case RegExpMatchFastGlobal:
     case CompareLess:
     case CompareLessEq:
     case CompareGreater:
@@ -272,6 +281,7 @@ bool safeToExecute(AbstractStateType& state, Graph& graph, Node* node)
     case CompareEq:
     case CompareStrictEq:
     case CompareEqPtr:
+    case SameValue:
     case Call:
     case DirectCall:
     case TailCallInlinedCaller:
@@ -304,6 +314,7 @@ bool safeToExecute(AbstractStateType& state, Graph& graph, Node* node)
     case IsUndefined:
     case IsBoolean:
     case IsNumber:
+    case NumberIsInteger:
     case IsObject:
     case IsObjectOrNull:
     case IsFunction:
@@ -323,7 +334,8 @@ bool safeToExecute(AbstractStateType& state, Graph& graph, Node* node)
     case CallStringConstructor:
     case NewStringObject:
     case MakeRope:
-    case In:
+    case InByVal:
+    case InById:
     case HasOwnProperty:
     case PushWithScope:
     case CreateActivation:
@@ -361,6 +373,7 @@ bool safeToExecute(AbstractStateType& state, Graph& graph, Node* node)
     case Unreachable:
     case ExtractOSREntryLocal:
     case ExtractCatchLocal:
+    case ClearCatchLocals:
     case CheckTierUpInLoop:
     case CheckTierUpAtReturn:
     case CheckTierUpAndOSREnter:
@@ -394,6 +407,7 @@ bool safeToExecute(AbstractStateType& state, Graph& graph, Node* node)
     case PhantomNewAsyncGeneratorFunction:
     case PhantomNewAsyncFunction:
     case PhantomCreateActivation:
+    case PhantomNewRegexp:
     case PutHint:
     case CheckStructureImmediate:
     case MaterializeNewObject:
@@ -429,6 +443,8 @@ bool safeToExecute(AbstractStateType& state, Graph& graph, Node* node)
     case LoadValueFromMapBucket:
     case ExtractValueFromWeakMapGet:
     case WeakMapGet:
+    case WeakSetAdd:
+    case WeakMapSet:
     case AtomicsAdd:
     case AtomicsAnd:
     case AtomicsCompareExchange:
@@ -440,6 +456,7 @@ bool safeToExecute(AbstractStateType& state, Graph& graph, Node* node)
     case AtomicsXor:
     case AtomicsIsLockFree:
     case InitializeEntrypointArguments:
+    case MatchStructure:
         return true;
 
     case ArraySlice:
@@ -474,9 +491,6 @@ bool safeToExecute(AbstractStateType& state, Graph& graph, Node* node)
     case StringCharCodeAt:
         return node->arrayMode().alreadyChecked(graph, node, state.forNode(graph.child(node, 0)));
 
-    case GetArrayMask:
-        return state.forNode(node->child1()).isType(SpecObject);
-
     case ArrayPush:
         return node->arrayMode().alreadyChecked(graph, node, state.forNode(graph.varArgChild(node, 1)));
 
@@ -497,9 +511,33 @@ bool safeToExecute(AbstractStateType& state, Graph& graph, Node* node)
     case GetByOffset:
     case GetGetterSetterByOffset:
     case PutByOffset: {
-        PropertyOffset offset = node->storageAccessData().offset;
+        StorageAccessData& data = node->storageAccessData();
+        PropertyOffset offset = data.offset;
+        UniquedStringImpl* uid = graph.identifiers()[data.identifierNumber];
 
-        if (state.structureClobberState() == StructuresAreWatched) {
+        InferredType::Descriptor inferredType;
+        switch (node->op()) {
+        case GetByOffset:
+        case GetGetterSetterByOffset:
+            inferredType = data.inferredType;
+            break;
+        case PutByOffset:
+            // PutByOffset knows about inferred types because it's the enforcer of that type rather
+            // than the consumer of that type. Therefore, PutByOffset expects TOP for the purpose of
+            // safe-to-execute in the sense that it will be happy with anything as general as TOP
+            // (so any type).
+            inferredType = InferredType::Top;
+            break;
+        default:
+            DFG_CRASH(graph, node, "Bad opcode");
+            break;
+        }
+
+        // Graph::isSafeToLoad() is all about proofs derived from PropertyConditions. Those don't
+        // know anything about inferred types. But if we have a proof derived from watching a
+        // structure that has a type proof, then the next case below will deal with it.
+        if (state.structureClobberState() == StructuresAreWatched
+            && inferredType.kind() == InferredType::Top) {
             if (JSObject* knownBase = node->child1()->dynamicCastConstant<JSObject*>(graph.m_vm)) {
                 if (graph.isSafeToLoad(knownBase, offset))
                     return true;
@@ -510,8 +548,15 @@ bool safeToExecute(AbstractStateType& state, Graph& graph, Node* node)
         if (value.isInfinite())
             return false;
         for (unsigned i = value.size(); i--;) {
-            if (!value[i]->isValidOffset(offset))
+            Structure* thisStructure = value[i].get();
+            if (!thisStructure->isValidOffset(offset))
                 return false;
+            if (inferredType.kind() != InferredType::Top) {
+                InferredType::Descriptor thisInferredType =
+                    graph.inferredTypeForProperty(thisStructure, uid);
+                if (!inferredType.subsumes(thisInferredType))
+                    return false;
+            }
         }
         return true;
     }

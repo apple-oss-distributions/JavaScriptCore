@@ -113,8 +113,20 @@ namespace JSC {
 
         // ParserArenaDeletable objects are deleted when the arena is deleted.
         // Clients must not call delete directly on such objects.
-        void* operator new(size_t, ParserArena&);
+        template<typename T> void* operator new(size_t, ParserArena&);
     };
+
+#define JSC_MAKE_PARSER_ARENA_DELETABLE_ALLOCATED_IMPL(__classToNew) \
+        void* operator new(size_t size, ParserArena& parserArena) \
+        { \
+            return ParserArenaDeletable::operator new<__classToNew>(size, parserArena); \
+        }
+
+#define JSC_MAKE_PARSER_ARENA_DELETABLE_ALLOCATED(__classToNew) \
+    public: \
+        JSC_MAKE_PARSER_ARENA_DELETABLE_ALLOCATED_IMPL(__classToNew) \
+    private: \
+        typedef int __thisIsHereToForceASemicolonAfterThisMacro
 
     class ParserArenaRoot {
         WTF_MAKE_FAST_ALLOCATED;
@@ -238,6 +250,7 @@ namespace JSC {
     };
 
     class VariableEnvironmentNode : public ParserArenaDeletable {
+        JSC_MAKE_PARSER_ARENA_DELETABLE_ALLOCATED(VariableEnvironmentNode);
     public:
         typedef DeclarationStacks::FunctionStack FunctionStack;
 
@@ -332,7 +345,12 @@ namespace JSC {
     class BigIntNode final : public ConstantNode {
     public:
         BigIntNode(const JSTokenLocation&, const Identifier&, uint8_t radix);
+        BigIntNode(const JSTokenLocation&, const Identifier&, uint8_t radix, bool sign);
         const Identifier& value() { return m_value; }
+
+        const Identifier& identifier() const { return m_value; }
+        uint8_t radix() const { return m_radix; }
+        bool sign() const { return m_sign; }
 
     private:
         bool isBigInt() const final { return true; }
@@ -340,6 +358,7 @@ namespace JSC {
 
         const Identifier& m_value;
         const uint8_t m_radix;
+        const bool m_sign;
     };
 
     class ThrowableExpressionData {
@@ -682,21 +701,24 @@ namespace JSC {
         bool m_optional;
     };
 
+    enum class ClassElementTag { No, Instance, Static, LastTag };
     class PropertyNode : public ParserArenaFreeable {
     public:
         enum Type { Constant = 1, Getter = 2, Setter = 4, Computed = 8, Shorthand = 16, Spread = 32 };
         enum PutType { Unknown, KnownDirect };
 
-        PropertyNode(const Identifier&, ExpressionNode*, Type, PutType, SuperBinding, bool isClassProperty);
-        PropertyNode(ExpressionNode*, Type, PutType, SuperBinding, bool isClassProperty);
-        PropertyNode(ExpressionNode* propertyName, ExpressionNode*, Type, PutType, SuperBinding, bool isClassProperty);
+        PropertyNode(const Identifier&, ExpressionNode*, Type, PutType, SuperBinding, ClassElementTag);
+        PropertyNode(ExpressionNode*, Type, PutType, SuperBinding, ClassElementTag);
+        PropertyNode(ExpressionNode* propertyName, ExpressionNode*, Type, PutType, SuperBinding, ClassElementTag);
 
         ExpressionNode* expressionName() const { return m_expression; }
         const Identifier* name() const { return m_name; }
 
         Type type() const { return static_cast<Type>(m_type); }
         bool needsSuperBinding() const { return m_needsSuperBinding; }
-        bool isClassProperty() const { return m_isClassProperty; }
+        bool isClassProperty() const { return static_cast<ClassElementTag>(m_classElementTag) != ClassElementTag::No; }
+        bool isStaticClassProperty() const { return static_cast<ClassElementTag>(m_classElementTag) == ClassElementTag::Static; }
+        bool isInstanceClassProperty() const { return static_cast<ClassElementTag>(m_classElementTag) == ClassElementTag::Instance; }
         bool isOverriddenByDuplicate() const { return m_isOverriddenByDuplicate; }
         void setIsOverriddenByDuplicate() { m_isOverriddenByDuplicate = true; }
         PutType putType() const { return static_cast<PutType>(m_putType); }
@@ -709,7 +731,8 @@ namespace JSC {
         unsigned m_type : 6;
         unsigned m_needsSuperBinding : 1;
         unsigned m_putType : 1;
-        unsigned m_isClassProperty: 1;
+        static_assert(1 << 2 > static_cast<unsigned>(ClassElementTag::LastTag), "ClassElementTag shouldn't use more than two bits");
+        unsigned m_classElementTag : 2;
         unsigned m_isOverriddenByDuplicate: 1;
     };
 
@@ -720,8 +743,13 @@ namespace JSC {
 
         bool hasStaticallyNamedProperty(const Identifier& propName);
 
+        RegisterID* emitBytecode(BytecodeGenerator&, RegisterID*, RegisterID*);
+
     private:
-        RegisterID* emitBytecode(BytecodeGenerator&, RegisterID* = 0) override;
+        RegisterID* emitBytecode(BytecodeGenerator& generator, RegisterID* dst = nullptr) override
+        {
+            return emitBytecode(generator, dst, nullptr);
+        }
         void emitPutConstantProperty(BytecodeGenerator&, RegisterID*, PropertyNode&);
 
         PropertyNode* m_node;
@@ -1413,9 +1441,8 @@ namespace JSC {
     };
 
     class BlockNode : public StatementNode, public VariableEnvironmentNode {
+        JSC_MAKE_PARSER_ARENA_DELETABLE_ALLOCATED(BlockNode);
     public:
-        using ParserArenaDeletable::operator new;
-
         BlockNode(const JSTokenLocation&, SourceElements*, VariableEnvironment&, FunctionStack&&);
 
         StatementNode* singleStatement() const;
@@ -1536,9 +1563,8 @@ namespace JSC {
     };
 
     class ForNode : public StatementNode, public VariableEnvironmentNode {
+        JSC_MAKE_PARSER_ARENA_DELETABLE_ALLOCATED(ForNode);
     public:
-        using ParserArenaDeletable::operator new;
-
         ForNode(const JSTokenLocation&, ExpressionNode* expr1, ExpressionNode* expr2, ExpressionNode* expr3, StatementNode*, VariableEnvironment&);
 
     private:
@@ -1553,9 +1579,8 @@ namespace JSC {
     class DestructuringPatternNode;
     
     class EnumerationNode : public StatementNode, public ThrowableExpressionData, public VariableEnvironmentNode {
+        JSC_MAKE_PARSER_ARENA_DELETABLE_ALLOCATED(EnumerationNode);
     public:
-        using ParserArenaDeletable::operator new;
-
         EnumerationNode(const JSTokenLocation&, ExpressionNode*, ExpressionNode*, StatementNode*, VariableEnvironment&);
 
         ExpressionNode* lexpr() const { return m_lexpr; }
@@ -1568,6 +1593,7 @@ namespace JSC {
     };
     
     class ForInNode : public EnumerationNode {
+        JSC_MAKE_PARSER_ARENA_DELETABLE_ALLOCATED(ForInNode);
     public:
         ForInNode(const JSTokenLocation&, ExpressionNode*, ExpressionNode*, StatementNode*, VariableEnvironment&);
 
@@ -1579,6 +1605,7 @@ namespace JSC {
     };
     
     class ForOfNode : public EnumerationNode {
+        JSC_MAKE_PARSER_ARENA_DELETABLE_ALLOCATED(ForOfNode);
     public:
         ForOfNode(bool, const JSTokenLocation&, ExpressionNode*, ExpressionNode*, StatementNode*, VariableEnvironment&);
         bool isForOfNode() const override { return true; }
@@ -1668,9 +1695,8 @@ namespace JSC {
     };
 
     class TryNode : public StatementNode, public VariableEnvironmentNode {
+        JSC_MAKE_PARSER_ARENA_DELETABLE_ALLOCATED(TryNode);
     public:
-        using ParserArenaDeletable::operator new;
-
         TryNode(const JSTokenLocation&, StatementNode* tryBlock, DestructuringPatternNode* catchPattern, StatementNode* catchBlock, VariableEnvironment& catchEnvironment, StatementNode* finallyBlock);
 
     private:
@@ -1684,11 +1710,14 @@ namespace JSC {
 
     class ScopeNode : public StatementNode, public ParserArenaRoot, public VariableEnvironmentNode {
     public:
+        // ScopeNode is never directly instantiate. The life-cycle of its derived classes are
+        // managed using std::unique_ptr. Hence, though ScopeNode extends VariableEnvironmentNode,
+        // which in turn extends ParserArenaDeletable, we don't want to use ParserArenaDeletable's
+        // new for allocation.
+        using ParserArenaRoot::operator new;
 
         ScopeNode(ParserArena&, const JSTokenLocation& start, const JSTokenLocation& end, bool inStrictContext);
         ScopeNode(ParserArena&, const JSTokenLocation& start, const JSTokenLocation& end, const SourceCode&, SourceElements*, VariableEnvironment&, FunctionStack&&, VariableEnvironment&, UniquedStringImplPtrSet&&, CodeFeatures, InnerArrowFunctionCodeFeatures, int numConstants);
-
-        using ParserArenaRoot::operator new;
 
         const SourceCode& source() const { return m_source; }
         const String& sourceURL() const { return m_source.provider()->url(); }
@@ -1831,6 +1860,7 @@ namespace JSC {
     };
 
     class ImportSpecifierListNode : public ParserArenaDeletable {
+        JSC_MAKE_PARSER_ARENA_DELETABLE_ALLOCATED(ImportSpecifierListNode);
     public:
         typedef Vector<ImportSpecifierNode*, 3> Specifiers;
 
@@ -1921,6 +1951,7 @@ namespace JSC {
     };
 
     class ExportSpecifierListNode : public ParserArenaDeletable {
+        JSC_MAKE_PARSER_ARENA_DELETABLE_ALLOCATED(ExportSpecifierListNode);
     public:
         typedef Vector<ExportSpecifierNode*, 3> Specifiers;
 
@@ -1949,15 +1980,22 @@ namespace JSC {
     };
 
     class FunctionMetadataNode final : public Node, public ParserArenaDeletable {
+        JSC_MAKE_PARSER_ARENA_DELETABLE_ALLOCATED(FunctionMetadataNode);
     public:
-        using ParserArenaDeletable::operator new;
-
         FunctionMetadataNode(
             ParserArena&, const JSTokenLocation& start, const JSTokenLocation& end, 
             unsigned startColumn, unsigned endColumn, int functionKeywordStart, 
             int functionNameStart, int parametersStart, bool isInStrictContext, 
             ConstructorKind, SuperBinding, unsigned parameterCount,
             SourceParseMode, bool isArrowFunctionBodyExpression);
+        FunctionMetadataNode(
+            const JSTokenLocation& start, const JSTokenLocation& end, 
+            unsigned startColumn, unsigned endColumn, int functionKeywordStart, 
+            int functionNameStart, int parametersStart, bool isInStrictContext, 
+            ConstructorKind, SuperBinding, unsigned parameterCount,
+            SourceParseMode, bool isArrowFunctionBodyExpression);
+
+        void dump(PrintStream&) const;
 
         void finishParsing(const SourceCode&, const Identifier&, FunctionMode);
         
@@ -1998,7 +2036,13 @@ namespace JSC {
         }
         unsigned lastLine() const { return m_lastLine; }
 
-    protected:
+        bool operator==(const FunctionMetadataNode&) const;
+        bool operator!=(const FunctionMetadataNode& other) const
+        {
+            return !(*this == other);
+        }
+
+    public:
         Identifier m_ident;
         Identifier m_ecmaName;
         Identifier m_inferredName;
@@ -2120,18 +2164,17 @@ namespace JSC {
     };
 
     class ClassExprNode final : public ExpressionNode, public VariableEnvironmentNode {
+        JSC_MAKE_PARSER_ARENA_DELETABLE_ALLOCATED(ClassExprNode);
     public:
-        using ParserArenaDeletable::operator new;
-
         ClassExprNode(const JSTokenLocation&, const Identifier&, const SourceCode& classSource,
             VariableEnvironment& classEnvironment, ExpressionNode* constructorExpresssion,
-            ExpressionNode* parentClass, PropertyListNode* instanceMethods, PropertyListNode* staticMethods);
+            ExpressionNode* parentClass, PropertyListNode* classElements);
 
         const Identifier& name() { return m_name; }
         const Identifier& ecmaName() { return m_ecmaName ? *m_ecmaName : m_name; }
         void setEcmaName(const Identifier& name) { m_ecmaName = m_name.isNull() ? &name : &m_name; }
 
-        bool hasStaticProperty(const Identifier& propName) { return m_staticMethods ? m_staticMethods->hasStaticallyNamedProperty(propName) : false; }
+        bool hasStaticProperty(const Identifier& propName) { return m_classElements ? m_classElements->hasStaticallyNamedProperty(propName) : false; }
 
     private:
         RegisterID* emitBytecode(BytecodeGenerator&, RegisterID* = 0) override;
@@ -2143,8 +2186,7 @@ namespace JSC {
         const Identifier* m_ecmaName;
         ExpressionNode* m_constructorExpression;
         ExpressionNode* m_classHeritage;
-        PropertyListNode* m_instanceMethods;
-        PropertyListNode* m_staticMethods;
+        PropertyListNode* m_classElements;
     };
 
     class DestructuringPatternNode : public ParserArenaFreeable {
@@ -2164,9 +2206,8 @@ namespace JSC {
     };
 
     class ArrayPatternNode : public DestructuringPatternNode, public ThrowableExpressionData, public ParserArenaDeletable {
+        JSC_MAKE_PARSER_ARENA_DELETABLE_ALLOCATED(ArrayPatternNode);
     public:
-        using ParserArenaDeletable::operator new;
-
         ArrayPatternNode();
         enum class BindingType {
             Elision,
@@ -2194,9 +2235,8 @@ namespace JSC {
     };
     
     class ObjectPatternNode : public DestructuringPatternNode, public ThrowableExpressionData, public ParserArenaDeletable {
+        JSC_MAKE_PARSER_ARENA_DELETABLE_ALLOCATED(ObjectPatternNode);
     public:
-        using ParserArenaDeletable::operator new;
-        
         ObjectPatternNode();
         enum class BindingType {
             Element,
@@ -2312,6 +2352,7 @@ namespace JSC {
     };
 
     class FunctionParameters : public ParserArenaDeletable {
+        JSC_MAKE_PARSER_ARENA_DELETABLE_ALLOCATED(FunctionParameters);
     public:
         FunctionParameters();
         ALWAYS_INLINE unsigned size() const { return m_patterns.size(); }
@@ -2410,9 +2451,8 @@ namespace JSC {
     };
 
     class SwitchNode : public StatementNode, public VariableEnvironmentNode {
+        JSC_MAKE_PARSER_ARENA_DELETABLE_ALLOCATED(SwitchNode);
     public:
-        using ParserArenaDeletable::operator new;
-
         SwitchNode(const JSTokenLocation&, ExpressionNode*, CaseBlockNode*, VariableEnvironment&, FunctionStack&&);
 
     private:
