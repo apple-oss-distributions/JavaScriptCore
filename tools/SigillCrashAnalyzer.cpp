@@ -79,7 +79,7 @@ private:
 
 struct SignalContext {
 private:
-    SignalContext(PlatformRegisters& registers, MacroAssemblerCodePtr<PlatformRegistersPCPtrTag> machinePC)
+    SignalContext(PlatformRegisters& registers, MacroAssemblerCodePtr<CFunctionPtrTag> machinePC)
         : registers(registers)
         , machinePC(machinePC)
         , stackPointer(MachineContext::stackPointer(registers))
@@ -148,7 +148,7 @@ public:
     }
 
     PlatformRegisters& registers;
-    MacroAssemblerCodePtr<PlatformRegistersPCPtrTag> machinePC;
+    MacroAssemblerCodePtr<CFunctionPtrTag> machinePC;
     void* stackPointer;
     void* framePointer;
 };
@@ -181,7 +181,7 @@ struct SignalContext {
 
     void dump() { }
 
-    MacroAssemblerCodePtr<PlatformRegistersPCPtrTag> machinePC;
+    MacroAssemblerCodePtr<CFunctionPtrTag> machinePC;
     void* stackPointer;
     void* framePointer;
 };
