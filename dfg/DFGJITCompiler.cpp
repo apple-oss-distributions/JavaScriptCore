@@ -59,8 +59,8 @@ JITCompiler::JITCompiler(Graph& dfg)
     if (UNLIKELY(shouldDumpDisassembly() || m_graph.m_vm.m_perBytecodeProfiler))
         m_disassembler = std::make_unique<Disassembler>(dfg);
 #if ENABLE(FTL_JIT)
-    m_jitCode->tierUpInLoopHierarchy = WTFMove(m_graph.m_plan.tierUpInLoopHierarchy);
-    for (unsigned tierUpBytecode : m_graph.m_plan.tierUpAndOSREnterBytecodes)
+    m_jitCode->tierUpInLoopHierarchy = WTFMove(m_graph.m_plan.tierUpInLoopHierarchy());
+    for (unsigned tierUpBytecode : m_graph.m_plan.tierUpAndOSREnterBytecodes())
         m_jitCode->tierUpEntryTriggers.add(tierUpBytecode, JITCode::TriggerReason::DontTrigger);
 #endif
 }
@@ -102,10 +102,8 @@ void JITCompiler::linkOSRExits()
             addLinkTask([target, osrExitThunkLabel] (LinkBuffer& linkBuffer) {
                 linkBuffer.link(target, osrExitThunkLabel);
             });
-        } else {
-            OSRExit& exit = m_jitCode->osrExit[i];
-            exit.setPatchableCodeOffset(patchableJump());
-        }
+        } else
+            info.m_patchableJump = patchableJump();
     }
 }
 
@@ -192,9 +190,9 @@ void JITCompiler::link(LinkBuffer& linkBuffer)
     m_jitCode->common.frameRegisterCount = m_graph.frameRegisterCount();
     m_jitCode->common.requiredRegisterCountForExit = m_graph.requiredRegisterCountForExit();
 
-    if (!m_graph.m_plan.inlineCallFrames->isEmpty())
-        m_jitCode->common.inlineCallFrames = m_graph.m_plan.inlineCallFrames;
-    
+    if (!m_graph.m_plan.inlineCallFrames()->isEmpty())
+        m_jitCode->common.inlineCallFrames = m_graph.m_plan.inlineCallFrames();
+
 #if USE(JSVALUE32_64)
     m_jitCode->common.doubleConstants = WTFMove(m_graph.m_doubleConstants);
 #endif
@@ -300,9 +298,9 @@ void JITCompiler::link(LinkBuffer& linkBuffer)
     for (unsigned i = 0; i < m_jitCode->osrExit.size(); ++i) {
         OSRExitCompilationInfo& info = m_exitCompilationInfo[i];
         if (!Options::useProbeOSRExit()) {
+            linkBuffer.link(info.m_patchableJump.m_jump, target);
             OSRExit& exit = m_jitCode->osrExit[i];
-            linkBuffer.link(exit.getPatchableCodeOffsetAsJump(), target);
-            exit.correctJump(linkBuffer);
+            exit.m_patchableJumpLocation = linkBuffer.locationOf<JSInternalPtrTag>(info.m_patchableJump);
         }
         if (info.m_replacementSource.isSet()) {
             m_jitCode->common.jumpReplacements.append(JumpReplacement(
@@ -389,7 +387,7 @@ void JITCompiler::compile()
     emitStoreCodeOrigin(CodeOrigin(0));
 
     if (maxFrameExtentForSlowPathCall)
-        addPtr(TrustedImm32(-maxFrameExtentForSlowPathCall), stackPointerRegister);
+        addPtr(TrustedImm32(-static_cast<int32_t>(maxFrameExtentForSlowPathCall)), stackPointerRegister);
 
     m_speculative->callOperationWithCallFrameRollbackOnException(operationThrowStackOverflowError, m_codeBlock);
 
@@ -406,7 +404,7 @@ void JITCompiler::compile()
 
     auto linkBuffer = std::make_unique<LinkBuffer>(*this, m_codeBlock, JITCompilationCanFail);
     if (linkBuffer->didFailToAllocate()) {
-        m_graph.m_plan.finalizer = std::make_unique<FailedFinalizer>(m_graph.m_plan);
+        m_graph.m_plan.setFinalizer(std::make_unique<FailedFinalizer>(m_graph.m_plan));
         return;
     }
     
@@ -417,9 +415,9 @@ void JITCompiler::compile()
     codeBlock()->shrinkToFit(CodeBlock::LateShrink);
 
     disassemble(*linkBuffer);
-    
-    m_graph.m_plan.finalizer = std::make_unique<JITFinalizer>(
-        m_graph.m_plan, m_jitCode.releaseNonNull(), WTFMove(linkBuffer));
+
+    m_graph.m_plan.setFinalizer(std::make_unique<JITFinalizer>(
+        m_graph.m_plan, m_jitCode.releaseNonNull(), WTFMove(linkBuffer)));
 }
 
 void JITCompiler::compileFunction()
@@ -465,7 +463,7 @@ void JITCompiler::compileFunction()
     emitStoreCodeOrigin(CodeOrigin(0));
 
     if (maxFrameExtentForSlowPathCall)
-        addPtr(TrustedImm32(-maxFrameExtentForSlowPathCall), stackPointerRegister);
+        addPtr(TrustedImm32(-static_cast<int32_t>(maxFrameExtentForSlowPathCall)), stackPointerRegister);
 
     m_speculative->callOperationWithCallFrameRollbackOnException(operationThrowStackOverflowError, m_codeBlock);
     
@@ -485,7 +483,7 @@ void JITCompiler::compileFunction()
         branch32(AboveOrEqual, GPRInfo::regT1, TrustedImm32(m_codeBlock->numParameters())).linkTo(fromArityCheck, this);
         emitStoreCodeOrigin(CodeOrigin(0));
         if (maxFrameExtentForSlowPathCall)
-            addPtr(TrustedImm32(-maxFrameExtentForSlowPathCall), stackPointerRegister);
+            addPtr(TrustedImm32(-static_cast<int32_t>(maxFrameExtentForSlowPathCall)), stackPointerRegister);
         m_speculative->callOperationWithCallFrameRollbackOnException(m_codeBlock->m_isConstructor ? operationConstructArityCheck : operationCallArityCheck, GPRInfo::regT0);
         if (maxFrameExtentForSlowPathCall)
             addPtr(TrustedImm32(maxFrameExtentForSlowPathCall), stackPointerRegister);
@@ -511,7 +509,7 @@ void JITCompiler::compileFunction()
     // === Link ===
     auto linkBuffer = std::make_unique<LinkBuffer>(*this, m_codeBlock, JITCompilationCanFail);
     if (linkBuffer->didFailToAllocate()) {
-        m_graph.m_plan.finalizer = std::make_unique<FailedFinalizer>(m_graph.m_plan);
+        m_graph.m_plan.setFinalizer(std::make_unique<FailedFinalizer>(m_graph.m_plan));
         return;
     }
     link(*linkBuffer);
@@ -527,8 +525,8 @@ void JITCompiler::compileFunction()
 
     MacroAssemblerCodePtr<JSEntryPtrTag> withArityCheck = linkBuffer->locationOf<JSEntryPtrTag>(arityCheck);
 
-    m_graph.m_plan.finalizer = std::make_unique<JITFinalizer>(
-        m_graph.m_plan, m_jitCode.releaseNonNull(), WTFMove(linkBuffer), withArityCheck);
+    m_graph.m_plan.setFinalizer(std::make_unique<JITFinalizer>(
+        m_graph.m_plan, m_jitCode.releaseNonNull(), WTFMove(linkBuffer), withArityCheck));
 }
 
 void JITCompiler::disassemble(LinkBuffer& linkBuffer)
@@ -537,9 +535,9 @@ void JITCompiler::disassemble(LinkBuffer& linkBuffer)
         m_disassembler->dump(linkBuffer);
         linkBuffer.didAlreadyDisassemble();
     }
-    
-    if (UNLIKELY(m_graph.m_plan.compilation))
-        m_disassembler->reportToProfiler(m_graph.m_plan.compilation.get(), linkBuffer);
+
+    if (UNLIKELY(m_graph.m_plan.compilation()))
+        m_disassembler->reportToProfiler(m_graph.m_plan.compilation(), linkBuffer);
 }
 
 #if USE(JSVALUE32_64)
@@ -576,7 +574,7 @@ void JITCompiler::noticeOSREntry(BasicBlock& basicBlock, JITCompiler::Label bloc
     if (!basicBlock.intersectionOfCFAHasVisited)
         return;
 
-    OSREntryData* entry = m_jitCode->appendOSREntryData(basicBlock.bytecodeBegin, linkBuffer.offsetOf(blockHead));
+    OSREntryData* entry = m_jitCode->appendOSREntryData(basicBlock.bytecodeBegin, linkBuffer.locationOf<OSREntryPtrTag>(blockHead));
 
     entry->m_expectedValues = basicBlock.intersectionOfPastValuesAtHead;
         

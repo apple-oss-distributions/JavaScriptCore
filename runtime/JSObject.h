@@ -159,11 +159,8 @@ public:
     bool setPrototype(VM&, ExecState*, JSValue prototype, bool shouldThrowIfCantSet = false);
     JS_EXPORT_PRIVATE static bool setPrototype(JSObject*, ExecState*, JSValue prototype, bool shouldThrowIfCantSet);
         
-    bool mayInterceptIndexedAccesses(VM& vm)
-    {
-        return structure(vm)->mayInterceptIndexedAccesses();
-    }
-        
+    inline bool mayInterceptIndexedAccesses(VM&);
+
     JSValue get(ExecState*, PropertyName) const;
     JSValue get(ExecState*, unsigned propertyName) const;
 
@@ -220,6 +217,7 @@ public:
     // otherwise, it creates a property with the provided attributes. Semantically, this is performing defineOwnProperty.
     bool putDirectIndex(ExecState* exec, unsigned propertyName, JSValue value, unsigned attributes, PutDirectIndexMode mode)
     {
+        ASSERT(!value.isCustomGetterSetter());
         auto canSetIndexQuicklyForPutDirect = [&] () -> bool {
             switch (indexingMode()) {
             case ALL_BLANK_INDEXING_TYPES:
@@ -755,7 +753,6 @@ public:
 
 private:
     NonPropertyTransition suggestedArrayStorageTransition(VM&) const;
-    ALWAYS_INLINE bool isExtensibleImpl(VM& vm) { return isStructureExtensible(vm); }
 public:
     // You should only call isStructureExtensible() when:
     // - Performing this check in a way that isn't described in the specification 
@@ -864,6 +861,12 @@ public:
             return m_butterfly->arrayStorage();
 
         return ensureArrayStorageSlow(vm);
+    }
+
+    void ensureWritable(VM& vm)
+    {
+        if (isCopyOnWrite(indexingMode()))
+            convertFromCopyOnWrite(vm);
     }
         
     static size_t offsetOfInlineStorage();
@@ -1014,7 +1017,8 @@ protected:
         
 private:
     friend class LLIntOffsetsExtractor;
-        
+    friend class VMInspector;
+
     // Nobody should ever ask any of these questions on something already known to be a JSObject.
     using JSCell::isAPIValueWrapper;
     using JSCell::isGetterSetter;
@@ -1042,9 +1046,7 @@ private:
         const HashTable* table;
         const HashTableValue* value;
     };
-    std::optional<PropertyHashEntry> findPropertyHashEntry(VM&, PropertyName) const;
-        
-    bool putIndexedDescriptor(ExecState*, SparseArrayEntry*, const PropertyDescriptor&, PropertyDescriptor& old);
+    Optional<PropertyHashEntry> findPropertyHashEntry(VM&, PropertyName) const;
         
     bool putByIndexBeyondVectorLength(ExecState*, unsigned propertyName, JSValue, bool shouldThrow);
     bool putDirectIndexBeyondVectorLengthWithArrayStorage(ExecState*, unsigned propertyName, JSValue, unsigned attributes, PutDirectIndexMode, ArrayStorage*);
@@ -1069,7 +1071,7 @@ private:
     PropertyOffset prepareToPutDirectWithoutTransition(VM&, PropertyName, unsigned attributes, StructureID, Structure*);
 
     AuxiliaryBarrier<Butterfly*> m_butterfly;
-#if USE(JSVALUE32_64)
+#if CPU(ADDRESS32)
     unsigned m_32BitPadding;
 #endif
 };
@@ -1372,6 +1374,7 @@ ALWAYS_INLINE bool JSObject::getOwnNonIndexPropertySlot(VM& vm, Structure* struc
 
 ALWAYS_INLINE void JSObject::fillCustomGetterPropertySlot(VM& vm, PropertySlot& slot, CustomGetterSetter* customGetterSetter, unsigned attributes, Structure* structure)
 {
+    ASSERT(attributes & PropertyAttribute::CustomAccessorOrValue);
     if (customGetterSetter->inherits<DOMAttributeGetterSetter>(vm)) {
         auto* domAttribute = jsCast<DOMAttributeGetterSetter*>(customGetterSetter);
         if (structure->isUncacheableDictionary())
@@ -1396,7 +1399,7 @@ ALWAYS_INLINE bool JSObject::getOwnPropertySlot(JSObject* object, ExecState* exe
     Structure* structure = object->structure(vm);
     if (object->getOwnNonIndexPropertySlot(vm, structure, propertyName, slot))
         return true;
-    if (std::optional<uint32_t> index = parseIndex(propertyName))
+    if (Optional<uint32_t> index = parseIndex(propertyName))
         return getOwnPropertySlotByIndex(object, exec, index.value(), slot);
     return false;
 }
@@ -1415,7 +1418,7 @@ ALWAYS_INLINE bool JSObject::getPropertySlot(ExecState* exec, PropertyName prope
             // getOwnNonIndexPropertySlot), so we cannot safely call the overridden getOwnPropertySlot
             // (lest we return a property from a prototype that is shadowed). Check now for an index,
             // if so we need to start afresh from this object.
-            if (std::optional<uint32_t> index = parseIndex(propertyName))
+            if (Optional<uint32_t> index = parseIndex(propertyName))
                 return getPropertySlot(exec, index.value(), slot);
             // Safe to continue searching from current position; call getNonIndexPropertySlot to avoid
             // parsing the int again.
@@ -1437,7 +1440,7 @@ ALWAYS_INLINE bool JSObject::getPropertySlot(ExecState* exec, PropertyName prope
         object = asObject(prototype);
     }
 
-    if (std::optional<uint32_t> index = parseIndex(propertyName))
+    if (Optional<uint32_t> index = parseIndex(propertyName))
         return getPropertySlot(exec, index.value(), slot);
     return false;
 }
@@ -1449,10 +1452,9 @@ inline JSValue JSObject::get(ExecState* exec, PropertyName propertyName) const
     PropertySlot slot(this, PropertySlot::InternalMethodType::Get);
     bool hasProperty = const_cast<JSObject*>(this)->getPropertySlot(exec, propertyName, slot);
     EXCEPTION_ASSERT(!scope.exception() || !hasProperty);
-    if (hasProperty) {
-        scope.release();
-        return slot.getValue(exec, propertyName);
-    }
+    if (hasProperty)
+        RELEASE_AND_RETURN(scope, slot.getValue(exec, propertyName));
+
     return jsUndefined();
 }
 
@@ -1463,10 +1465,9 @@ inline JSValue JSObject::get(ExecState* exec, unsigned propertyName) const
     PropertySlot slot(this, PropertySlot::InternalMethodType::Get);
     bool hasProperty = const_cast<JSObject*>(this)->getPropertySlot(exec, propertyName, slot);
     EXCEPTION_ASSERT(!scope.exception() || !hasProperty);
-    if (hasProperty) {
-        scope.release();
-        return slot.getValue(exec, propertyName);
-    }
+    if (hasProperty)
+        RELEASE_AND_RETURN(scope, slot.getValue(exec, propertyName));
+
     return jsUndefined();
 }
 
@@ -1488,7 +1489,7 @@ inline bool JSObject::putOwnDataPropertyMayBeIndex(ExecState* exec, PropertyName
     ASSERT(!structure(vm)->hasGetterSetterProperties());
     ASSERT(!structure(vm)->hasCustomGetterSetterProperties());
 
-    if (std::optional<uint32_t> index = parseIndex(propertyName))
+    if (Optional<uint32_t> index = parseIndex(propertyName))
         return putDirectIndex(exec, index.value(), value, 0, PutDirectIndexLikePutDirect);
 
     return putDirectInternal<PutModePut>(vm, propertyName, value, 0, slot);
@@ -1497,7 +1498,7 @@ inline bool JSObject::putOwnDataPropertyMayBeIndex(ExecState* exec, PropertyName
 inline bool JSObject::putDirect(VM& vm, PropertyName propertyName, JSValue value, unsigned attributes)
 {
     ASSERT(!value.isGetterSetter() && !(attributes & PropertyAttribute::Accessor));
-    ASSERT(!value.isCustomGetterSetter());
+    ASSERT(!value.isCustomGetterSetter() && !(attributes & PropertyAttribute::CustomAccessorOrValue));
     PutPropertySlot slot(this);
     return putDirectInternal<PutModeDefineOwnProperty>(vm, propertyName, value, attributes, slot);
 }

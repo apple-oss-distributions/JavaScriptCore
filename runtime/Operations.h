@@ -1,6 +1,6 @@
 /*
  *  Copyright (C) 1999-2000 Harri Porten (porten@kde.org)
- *  Copyright (C) 2002-2017 Apple Inc. All rights reserved.
+ *  Copyright (C) 2002-2018 Apple Inc. All rights reserved.
  *
  *  This library is free software; you can redistribute it and/or
  *  modify it under the terms of the GNU Library General Public
@@ -42,12 +42,13 @@ ALWAYS_INLINE JSString* jsString(ExecState* exec, JSString* s1, JSString* s2)
     VM& vm = exec->vm();
     auto scope = DECLARE_THROW_SCOPE(vm);
 
-    int32_t length1 = s1->length();
+    unsigned length1 = s1->length();
     if (!length1)
         return s2;
-    int32_t length2 = s2->length();
+    unsigned length2 = s2->length();
     if (!length2)
         return s1;
+    static_assert(JSString::MaxLength == std::numeric_limits<int32_t>::max(), "");
     if (sumOverflows<int32_t>(length1, length2)) {
         throwOutOfMemoryError(exec, scope);
         return nullptr;
@@ -61,22 +62,19 @@ ALWAYS_INLINE JSString* jsString(ExecState* exec, JSString* s1, JSString* s2, JS
     VM& vm = exec->vm();
     auto scope = DECLARE_THROW_SCOPE(vm);
 
-    int32_t length1 = s1->length();
-    if (!length1) {
-        scope.release();
-        return jsString(exec, s2, s3);
-    }
-    int32_t length2 = s2->length();
-    if (!length2) {
-        scope.release();
-        return jsString(exec, s1, s3);
-    }
-    int32_t length3 = s3->length();
-    if (!length3) {
-        scope.release();
-        return jsString(exec, s1, s2);
-    }
+    unsigned length1 = s1->length();
+    if (!length1)
+        RELEASE_AND_RETURN(scope, jsString(exec, s2, s3));
 
+    unsigned length2 = s2->length();
+    if (!length2)
+        RELEASE_AND_RETURN(scope, jsString(exec, s1, s3));
+
+    unsigned length3 = s3->length();
+    if (!length3)
+        RELEASE_AND_RETURN(scope, jsString(exec, s1, s2));
+
+    static_assert(JSString::MaxLength == std::numeric_limits<int32_t>::max(), "");
     if (sumOverflows<int32_t>(length1, length2, length3)) {
         throwOutOfMemoryError(exec, scope);
         return nullptr;
@@ -89,28 +87,23 @@ ALWAYS_INLINE JSString* jsString(ExecState* exec, const String& u1, const String
     VM* vm = &exec->vm();
     auto scope = DECLARE_THROW_SCOPE(*vm);
 
-    int32_t length1 = u1.length();
-    int32_t length2 = u2.length();
-    int32_t length3 = u3.length();
-    
-    if (length1 < 0 || length2 < 0 || length3 < 0) {
-        throwOutOfMemoryError(exec, scope);
-        return nullptr;
-    }
-    
-    if (!length1) {
-        scope.release();
-        return jsString(exec, jsString(vm, u2), jsString(vm, u3));
-    }
-    if (!length2) {
-        scope.release();
-        return jsString(exec, jsString(vm, u1), jsString(vm, u3));
-    }
-    if (!length3) {
-        scope.release();
-        return jsString(exec, jsString(vm, u1), jsString(vm, u2));
-    }
+    unsigned length1 = u1.length();
+    unsigned length2 = u2.length();
+    unsigned length3 = u3.length();
+    ASSERT(length1 <= JSString::MaxLength);
+    ASSERT(length2 <= JSString::MaxLength);
+    ASSERT(length3 <= JSString::MaxLength);
 
+    if (!length1)
+        RELEASE_AND_RETURN(scope, jsString(exec, jsString(vm, u2), jsString(vm, u3)));
+
+    if (!length2)
+        RELEASE_AND_RETURN(scope, jsString(exec, jsString(vm, u1), jsString(vm, u3)));
+
+    if (!length3)
+        RELEASE_AND_RETURN(scope, jsString(exec, jsString(vm, u1), jsString(vm, u2)));
+
+    static_assert(JSString::MaxLength == std::numeric_limits<int32_t>::max(), "");
     if (sumOverflows<int32_t>(length1, length2, length3)) {
         throwOutOfMemoryError(exec, scope);
         return nullptr;
@@ -270,10 +263,8 @@ ALWAYS_INLINE bool jsLess(CallFrame* callFrame, JSValue v1, JSValue v2)
     RETURN_IF_EXCEPTION(scope, false);
 
     if (wasNotString1 | wasNotString2) {
-        if (p1.isBigInt() || p2.isBigInt()) {
-            scope.release();
-            return bigIntCompare(callFrame, p1, p2, JSBigInt::ComparisonMode::LessThan);
-        }
+        if (p1.isBigInt() || p2.isBigInt())
+            RELEASE_AND_RETURN(scope, bigIntCompare(callFrame, p1, p2, JSBigInt::ComparisonMode::LessThan));
 
         return n1 < n2;
     }
@@ -317,10 +308,8 @@ ALWAYS_INLINE bool jsLessEq(CallFrame* callFrame, JSValue v1, JSValue v2)
     RETURN_IF_EXCEPTION(scope, false);
 
     if (wasNotString1 | wasNotString2) {
-        if (p1.isBigInt() || p2.isBigInt()) {
-            scope.release();
-            return bigIntCompare(callFrame, p1, p2, JSBigInt::ComparisonMode::LessThanOrEqual);
-        }
+        if (p1.isBigInt() || p2.isBigInt())
+            RELEASE_AND_RETURN(scope, bigIntCompare(callFrame, p1, p2, JSBigInt::ComparisonMode::LessThanOrEqual));
 
         return n1 <= n2;
     }
@@ -359,8 +348,10 @@ ALWAYS_INLINE JSValue jsSub(ExecState* exec, JSValue v1, JSValue v2)
     RETURN_IF_EXCEPTION(scope, { });
 
     if (WTF::holds_alternative<JSBigInt*>(leftNumeric) || WTF::holds_alternative<JSBigInt*>(rightNumeric)) {
-        if (WTF::holds_alternative<JSBigInt*>(leftNumeric) && WTF::holds_alternative<JSBigInt*>(rightNumeric))
-            return JSBigInt::sub(vm, WTF::get<JSBigInt*>(leftNumeric), WTF::get<JSBigInt*>(rightNumeric));
+        if (WTF::holds_alternative<JSBigInt*>(leftNumeric) && WTF::holds_alternative<JSBigInt*>(rightNumeric)) {
+            scope.release();
+            return JSBigInt::sub(exec, WTF::get<JSBigInt*>(leftNumeric), WTF::get<JSBigInt*>(rightNumeric));
+        }
 
         return throwTypeError(exec, scope, "Invalid mix of BigInt and other type in subtraction."_s);
     }
@@ -379,8 +370,10 @@ ALWAYS_INLINE JSValue jsMul(ExecState* state, JSValue v1, JSValue v2)
     RETURN_IF_EXCEPTION(scope, { });
 
     if (WTF::holds_alternative<JSBigInt*>(leftNumeric) || WTF::holds_alternative<JSBigInt*>(rightNumeric)) {
-        if (WTF::holds_alternative<JSBigInt*>(leftNumeric) && WTF::holds_alternative<JSBigInt*>(rightNumeric))
+        if (WTF::holds_alternative<JSBigInt*>(leftNumeric) && WTF::holds_alternative<JSBigInt*>(rightNumeric)) {
+            scope.release();
             return JSBigInt::multiply(state, WTF::get<JSBigInt*>(leftNumeric), WTF::get<JSBigInt*>(rightNumeric));
+        }
 
         throwTypeError(state, scope, "Invalid mix of BigInt and other type in multiplication."_s);
         return { };

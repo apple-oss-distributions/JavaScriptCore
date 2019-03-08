@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013-2017 Apple Inc. All rights reserved.
+ * Copyright (C) 2013-2018 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -54,11 +54,11 @@ public:
     CommonData* dfgCommon() override;
     JITCode* dfg() override;
     
-    OSREntryData* appendOSREntryData(unsigned bytecodeIndex, unsigned machineCodeOffset)
+    OSREntryData* appendOSREntryData(unsigned bytecodeIndex, CodeLocationLabel<OSREntryPtrTag> machineCode)
     {
         DFG::OSREntryData entry;
         entry.m_bytecodeIndex = bytecodeIndex;
-        entry.m_machineCodeOffset = machineCodeOffset;
+        entry.m_machineCode = machineCode;
         osrEntry.append(entry);
         return &osrEntry.last();
     }
@@ -126,7 +126,7 @@ public:
 
     static ptrdiff_t commonDataOffset() { return OBJECT_OFFSETOF(JITCode, common); }
 
-    std::optional<CodeOrigin> findPC(CodeBlock*, void* pc) override;
+    Optional<CodeOrigin> findPC(CodeBlock*, void* pc) override;
     
 private:
     friend class JITCompiler; // Allow JITCompiler to call setCodeRef().

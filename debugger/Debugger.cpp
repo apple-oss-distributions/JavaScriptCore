@@ -1,5 +1,5 @@
 /*
- *  Copyright (C) 2008-2017 Apple Inc. All rights reserved.
+ *  Copyright (C) 2008-2018 Apple Inc. All rights reserved.
  *  Copyright (C) 1999-2001 Harri Porten (porten@kde.org)
  *  Copyright (C) 2001 Peter Kelly (pmk@post.com)
  *
@@ -364,7 +364,7 @@ void Debugger::resolveBreakpoint(Breakpoint& breakpoint, SourceProvider* sourceP
     unsigned column = breakpoint.column ? breakpoint.column : Breakpoint::unspecifiedColumn;
 
     DebuggerParseData& parseData = debuggerParseData(breakpoint.sourceID, sourceProvider);
-    std::optional<JSTextPosition> resolvedPosition = parseData.pausePositions.breakpointLocationForLineColumn((int)line, (int)column);
+    Optional<JSTextPosition> resolvedPosition = parseData.pausePositions.breakpointLocationForLineColumn((int)line, (int)column);
     if (!resolvedPosition)
         return;
 
@@ -686,6 +686,7 @@ void Debugger::pauseIfNeeded(CallFrame* callFrame)
 {
     VM& vm = m_vm;
     auto scope = DECLARE_THROW_SCOPE(vm);
+    ASSERT(callFrame);
 
     if (m_isPaused)
         return;
@@ -718,7 +719,7 @@ void Debugger::pauseIfNeeded(CallFrame* callFrame)
     // reseting the pause state before executing any breakpoint actions.
     TemporaryPausedState pausedState(*this);
 
-    JSGlobalObject* vmEntryGlobalObject = callFrame->vmEntryGlobalObject(vm);
+    JSGlobalObject* vmEntryGlobalObject = vm.vmEntryGlobalObject(callFrame);
 
     if (didHitBreakpoint) {
         handleBreakpointHit(vmEntryGlobalObject, breakpoint);

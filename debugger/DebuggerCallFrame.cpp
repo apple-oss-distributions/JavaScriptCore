@@ -118,7 +118,8 @@ JSC::JSGlobalObject* DebuggerCallFrame::vmEntryGlobalObject() const
     ASSERT(isValid());
     if (!isValid())
         return nullptr;
-    return m_validMachineFrame->vmEntryGlobalObject();
+    VM& vm = m_validMachineFrame->vm();
+    return vm.vmEntryGlobalObject(m_validMachineFrame);
 }
 
 SourceID DebuggerCallFrame::sourceID() const
@@ -252,7 +253,7 @@ JSValue DebuggerCallFrame::evaluateWithScopeExtension(const String& script, JSOb
         return jsUndefined();
     }
 
-    JSGlobalObject* globalObject = callFrame->vmEntryGlobalObject();
+    JSGlobalObject* globalObject = vm.vmEntryGlobalObject(callFrame);
     if (scopeExtensionObject) {
         JSScope* ignoredPreviousScope = globalObject->globalScope();
         globalObject->setGlobalScopeExtension(JSWithScope::create(vm, globalObject, ignoredPreviousScope, scopeExtensionObject));
@@ -292,7 +293,7 @@ TextPosition DebuggerCallFrame::currentPosition(VM& vm)
 
     if (isTailDeleted()) {
         CodeBlock* codeBlock = m_shadowChickenFrame.codeBlock;
-        if (std::optional<unsigned> bytecodeOffset = codeBlock->bytecodeOffsetFromCallSiteIndex(m_shadowChickenFrame.callSiteIndex)) {
+        if (Optional<unsigned> bytecodeOffset = codeBlock->bytecodeOffsetFromCallSiteIndex(m_shadowChickenFrame.callSiteIndex)) {
             return TextPosition(OrdinalNumber::fromOneBasedInt(codeBlock->lineNumberForBytecodeOffset(*bytecodeOffset)),
                 OrdinalNumber::fromOneBasedInt(codeBlock->columnNumberForBytecodeOffset(*bytecodeOffset)));
         }
