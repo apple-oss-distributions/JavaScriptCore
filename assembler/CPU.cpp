@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016 Apple Inc. All rights reserved.
+ * Copyright (C) 2019 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -23,26 +23,49 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. 
  */
 
-#pragma once
+#include "config.h"
+#include "CPU.h"
 
-#if ENABLE(B3_JIT)
+#if (CPU(X86) || CPU(X86_64)) && OS(DARWIN)
+#include <mutex>
+#include <sys/sysctl.h>
+#endif
 
-namespace JSC { namespace B3 { namespace Air {
+namespace JSC {
 
-class Code;
+#if (CPU(X86) || CPU(X86_64)) && OS(DARWIN)
+bool isKernTCSMAvailable()
+{
+    uint32_t val = 0;
+    size_t valSize = sizeof(val);
+    int rc = sysctlbyname("kern.tcsm_available", &val, &valSize, NULL, 0);
+    if (rc < 0)
+        return false;
+    return !!val;
+}
 
-// This isn't a phase - it's meant to be a utility that other phases use. Air reasons about liveness by
-// reasoning about interference at boundaries between instructions. This is convenient because it works
-// great in the most common case: early uses and late defs. However, this can go wrong - for example, a
-// late use in one instruction doesn't actually interfere with an early def of the next instruction, but
-// Air thinks that it does. It can also go wrong by having liveness incorrectly report that something is
-// dead when it isn't.
-//
-// See https://bugs.webkit.org/show_bug.cgi?id=163548#c2 for more info.
+bool enableKernTCSM()
+{
+    uint32_t val = 1;
+    int rc = sysctlbyname("kern.tcsm_enable", NULL, 0, &val, sizeof(val));
+    if (rc < 0)
+        return false;
+    return true;
+}
 
-void padInterference(Code&);
+int kernTCSMAwareNumberOfProcessorCores()
+{
+    static std::once_flag onceFlag;
+    static int result;
+    std::call_once(onceFlag, [] {
+        result = WTF::numberOfProcessorCores();
+        if (result <= 1)
+            return;
+        if (isKernTCSMAvailable())
+            --result;
+    });
+    return result;
+}
+#endif // #if (CPU(X86) || CPU(X86_64)) && OS(DARWIN)
 
-} } } // namespace JSC::B3::Air
-
-#endif // ENABLE(B3_JIT)
-
+} // namespace JSC
