@@ -26,6 +26,7 @@
 #pragma once
 
 #include "Options.h"
+#include <wtf/NumberOfCores.h>
 
 namespace JSC {
 
@@ -49,6 +50,15 @@ constexpr bool isARMv7IDIVSupported()
 constexpr bool isARM64()
 {
 #if CPU(ARM64)
+    return true;
+#else
+    return false;
+#endif
+}
+
+constexpr bool isARM64E()
+{
+#if CPU(ARM64E)
     return true;
 #else
     return false;
@@ -130,6 +140,16 @@ inline bool hasSensibleDoubleToInt()
 {
     return optimizeForX86();
 }
+
+#if (CPU(X86) || CPU(X86_64)) && OS(DARWIN)
+bool isKernTCSMAvailable();
+bool enableKernTCSM();
+int kernTCSMAwareNumberOfProcessorCores();
+#else
+ALWAYS_INLINE bool isKernTCSMAvailable() { return false; }
+ALWAYS_INLINE bool enableKernTCSM() { return false; }
+ALWAYS_INLINE int kernTCSMAwareNumberOfProcessorCores() { return WTF::numberOfProcessorCores(); }
+#endif
 
 } // namespace JSC
 

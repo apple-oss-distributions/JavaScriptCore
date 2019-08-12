@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2011-2018 Apple Inc. All rights reserved.
+ * Copyright (C) 2011-2019 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,6 +27,7 @@
 #include "Options.h"
 
 #include "AssemblerCommon.h"
+#include "CPU.h"
 #include "LLIntCommon.h"
 #include "MinimumReservedZoneSize.h"
 #include "SigillCrashAnalyzer.h"
@@ -204,7 +205,7 @@ bool Options::overrideAliasedOptionWithHeuristic(const char* name)
 
 static unsigned computeNumberOfWorkerThreads(int maxNumberOfWorkerThreads, int minimum = 1)
 {
-    int cpusToUse = std::min(WTF::numberOfProcessorCores(), maxNumberOfWorkerThreads);
+    int cpusToUse = std::min(kernTCSMAwareNumberOfProcessorCores(), maxNumberOfWorkerThreads);
 
     // Be paranoid, it is the OS we're dealing with, after all.
     ASSERT(cpusToUse >= 1);
@@ -213,7 +214,7 @@ static unsigned computeNumberOfWorkerThreads(int maxNumberOfWorkerThreads, int m
 
 static int32_t computePriorityDeltaOfWorkerThreads(int32_t twoCorePriorityDelta, int32_t multiCorePriorityDelta)
 {
-    if (WTF::numberOfProcessorCores() <= 2)
+    if (kernTCSMAwareNumberOfProcessorCores() <= 2)
         return twoCorePriorityDelta;
 
     return multiCorePriorityDelta;
@@ -391,15 +392,17 @@ static void recomputeDependentOptions()
 #if !ENABLE(JIT)
     Options::useLLInt() = true;
     Options::useJIT() = false;
+    Options::useBaselineJIT() = false;
     Options::useDFGJIT() = false;
     Options::useFTLJIT() = false;
     Options::useDOMJIT() = false;
-#endif
-#if !ENABLE(YARR_JIT)
     Options::useRegExpJIT() = false;
 #endif
 #if !ENABLE(CONCURRENT_JS)
     Options::useConcurrentJIT() = false;
+#endif
+#if !ENABLE(YARR_JIT)
+    Options::useRegExpJIT() = false;
 #endif
 #if !ENABLE(DFG_JIT)
     Options::useDFGJIT() = false;
@@ -412,17 +415,11 @@ static void recomputeDependentOptions()
 #if !CPU(X86_64) && !CPU(ARM64)
     Options::useConcurrentGC() = false;
 #endif
-    
-#if ENABLE(JIT) && CPU(X86)
-    // Disable JIT on IA-32 if SSE2 is not present
-    if (!MacroAssemblerX86::supportsFloatingPoint())
-        Options::useJIT() = false;
-#endif
 
-    WTF_SET_POINTER_PREPARATION_OPTIONS();
-
-    if (!Options::useJIT())
+    if (!Options::useJIT()) {
+        Options::useSigillCrashAnalyzer() = false;
         Options::useWebAssembly() = false;
+    }
 
     if (!Options::useWebAssembly())
         Options::useFastTLSForWasmContext() = false;
@@ -450,7 +447,8 @@ static void recomputeDependentOptions()
         || Options::logPhaseTimes()
         || Options::verboseCFA()
         || Options::verboseDFGFailure()
-        || Options::verboseFTLFailure())
+        || Options::verboseFTLFailure()
+        || Options::dumpRandomizingFuzzerAgentPredictions())
         Options::alwaysComputeHash() = true;
     
     if (!Options::useConcurrentGC())
@@ -511,9 +509,6 @@ static void recomputeDependentOptions()
         Options::scribbleFreeCells() = true;
     }
 
-    if (Options::useSigillCrashAnalyzer())
-        enableSigillCrashAnalyzer();
-
     if (Options::reservedZoneSize() < minimumReservedZoneSize)
         Options::reservedZoneSize() = minimumReservedZoneSize;
     if (Options::softReservedZoneSize() < Options::reservedZoneSize() + minimumReservedZoneSize)
@@ -524,6 +519,9 @@ static void recomputeDependentOptions()
     // https://bugs.webkit.org/show_bug.cgi?id=177956
     Options::useProbeOSRExit() = false;
 #endif
+
+    if (!Options::useCodeCache())
+        Options::diskCachePath() = nullptr;
 }
 
 void Options::initialize()
@@ -902,7 +900,7 @@ void Option::dump(StringBuilder& builder) const
         builder.appendNumber(m_entry.sizeVal);
         break;
     case Options::Type::doubleType:
-        builder.appendNumber(m_entry.doubleVal);
+        builder.appendFixedPrecisionNumber(m_entry.doubleVal);
         break;
     case Options::Type::int32Type:
         builder.appendNumber(m_entry.int32Val);

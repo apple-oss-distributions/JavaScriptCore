@@ -1,7 +1,7 @@
 /*
  *  Copyright (C) 1999-2001 Harri Porten (porten@kde.org)
  *  Copyright (C) 2001 Peter Kelly (pmk@post.com)
- *  Copyright (C) 2003-2018 Apple Inc. All rights reserved.
+ *  Copyright (C) 2003-2019 Apple Inc. All rights reserved.
  *
  *  This library is free software; you can redistribute it and/or
  *  modify it under the terms of the GNU Library General Public
@@ -23,6 +23,7 @@
 #pragma once
 
 #include "JSExportMacros.h"
+#include "PureNaN.h"
 #include <functional>
 #include <math.h>
 #include <stddef.h>
@@ -210,6 +211,8 @@ public:
     int32_t asInt32() const;
     uint32_t asUInt32() const;
     int64_t asAnyInt() const;
+    uint32_t asUInt32AsAnyInt() const;
+    int32_t asInt32AsAnyInt() const;
     double asDouble() const;
     bool asBoolean() const;
     double asNumber() const;
@@ -227,6 +230,8 @@ public:
     bool isUndefinedOrNull() const;
     bool isBoolean() const;
     bool isAnyInt() const;
+    bool isUInt32AsAnyInt() const;
+    bool isInt32AsAnyInt() const;
     bool isNumber() const;
     bool isString() const;
     bool isBigInt() const;
@@ -548,6 +553,7 @@ ALWAYS_INLINE JSValue jsDoubleNumber(double d)
 ALWAYS_INLINE JSValue jsNumber(double d)
 {
     ASSERT(JSValue(d).isNumber());
+    ASSERT(!isImpureNaN(d));
     return JSValue(d);
 }
 
