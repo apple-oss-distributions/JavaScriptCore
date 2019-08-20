@@ -43,11 +43,6 @@ namespace JSC {
 
 #if ENABLE(ASSEMBLER)
 
-#if ENABLE(MASM_PROBE)
-struct ProbeContext;
-typedef void (*ProbeFunction)(struct ProbeContext*);
-#endif
-    
 class AllowMacroScratchRegisterUsage;
 class DisallowMacroScratchRegisterUsage;
 class LinkBuffer;
@@ -88,13 +83,23 @@ public:
     class Jump;
 
     typedef typename AssemblerType::RegisterID RegisterID;
+    typedef typename AssemblerType::SPRegisterID SPRegisterID;
     typedef typename AssemblerType::FPRegisterID FPRegisterID;
     
     static constexpr RegisterID firstRegister() { return AssemblerType::firstRegister(); }
     static constexpr RegisterID lastRegister() { return AssemblerType::lastRegister(); }
+    static constexpr unsigned numberOfRegisters() { return AssemblerType::numberOfRegisters(); }
+    static const char* gprName(RegisterID id) { return AssemblerType::gprName(id); }
+
+    static constexpr SPRegisterID firstSPRegister() { return AssemblerType::firstSPRegister(); }
+    static constexpr SPRegisterID lastSPRegister() { return AssemblerType::lastSPRegister(); }
+    static constexpr unsigned numberOfSPRegisters() { return AssemblerType::numberOfSPRegisters(); }
+    static const char* sprName(SPRegisterID id) { return AssemblerType::sprName(id); }
 
     static constexpr FPRegisterID firstFPRegister() { return AssemblerType::firstFPRegister(); }
     static constexpr FPRegisterID lastFPRegister() { return AssemblerType::lastFPRegister(); }
+    static constexpr unsigned numberOfFPRegisters() { return AssemblerType::numberOfFPRegisters(); }
+    static const char* fprName(FPRegisterID id) { return AssemblerType::fprName(id); }
 
     // Section 1: MacroAssembler operand types
     //
@@ -825,7 +830,7 @@ public:
 
     static ptrdiff_t differenceBetweenCodePtr(const MacroAssemblerCodePtr& a, const MacroAssemblerCodePtr& b)
     {
-        return reinterpret_cast<ptrdiff_t>(b.executableAddress()) - reinterpret_cast<ptrdiff_t>(a.executableAddress());
+        return b.executableAddress<ptrdiff_t>() - a.executableAddress<ptrdiff_t>();
     }
 
     unsigned debugOffset() { return m_assembler.debugOffset(); }
@@ -845,6 +850,11 @@ public:
     static void linkPointer(void* code, AssemblerLabel label, void* value)
     {
         AssemblerType::linkPointer(code, label, value);
+    }
+
+    static void linkPointer(void* code, AssemblerLabel label, MacroAssemblerCodePtr value)
+    {
+        AssemblerType::linkPointer(code, label, value.executableAddress());
     }
 
     static void* getLinkerAddress(void* code, AssemblerLabel label)
