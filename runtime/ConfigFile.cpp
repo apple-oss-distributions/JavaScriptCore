@@ -314,7 +314,7 @@ void ConfigFile::parse()
                     while (*p && !isASCIISpace(*p) && *p != '=')
                         p++;
 
-                    builder.append(optionNameStart, p - optionNameStart);
+                    builder.appendCharacters(optionNameStart, p - optionNameStart);
 
                     while (*p && isASCIISpace(*p) && *p != '=')
                         p++;
@@ -336,7 +336,7 @@ void ConfigFile::parse()
                     while (*p && !isASCIISpace(*p))
                         p++;
 
-                    builder.append(optionValueStart, p - optionValueStart);
+                    builder.appendCharacters(optionValueStart, p - optionValueStart);
                     builder.append('\n');
 
                     while (*p && isASCIISpace(*p))
@@ -465,7 +465,7 @@ void ConfigFile::parse()
             WTF::setDataFile(logPathname);
 
         if (!jscOptionsBuilder.isEmpty()) {
-            Options::enableRestrictedOptions(true);
+            JSC::Config::enableRestrictedOptions();
             Options::setOptions(jscOptionsBuilder.toString().utf8().data());
         }
     } else

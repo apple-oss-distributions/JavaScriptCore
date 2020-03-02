@@ -1,5 +1,6 @@
 cmake_minimum_required(VERSION 3.10)
 include(WebKitCommon)
+include(target/TargetWTF)
 set_property(DIRECTORY . PROPERTY FOLDER "JavaScriptCore")
 
 list(APPEND JavaScriptCore_UNIFIED_SOURCE_LIST_FILES
@@ -99,7 +100,8 @@ set(JavaScriptCore_OBJECT_LUT_SOURCES
     wasm/js/JSToWasmICCallee.cpp
     wasm/js/WebAssemblyCompileErrorConstructor.cpp
     wasm/js/WebAssemblyCompileErrorPrototype.cpp
-    wasm/js/WebAssemblyFunctionHeapCellType.cpp
+    wasm/js/WebAssemblyGlobalConstructor.cpp
+    wasm/js/WebAssemblyGlobalPrototype.cpp
     wasm/js/WebAssemblyInstanceConstructor.cpp
     wasm/js/WebAssemblyInstancePrototype.cpp
     wasm/js/WebAssemblyLinkErrorConstructor.cpp
@@ -108,7 +110,6 @@ set(JavaScriptCore_OBJECT_LUT_SOURCES
     wasm/js/WebAssemblyMemoryPrototype.cpp
     wasm/js/WebAssemblyModuleConstructor.cpp
     wasm/js/WebAssemblyModulePrototype.cpp
-    wasm/js/WebAssemblyPrototype.cpp
     wasm/js/WebAssemblyRuntimeErrorConstructor.cpp
     wasm/js/WebAssemblyRuntimeErrorPrototype.cpp
     wasm/js/WebAssemblyTableConstructor.cpp
@@ -214,23 +215,20 @@ set(GENERATOR
 )
 
 add_custom_command(
-    OUTPUT ${JavaScriptCore_DERIVED_SOURCES_DIR}/Bytecodes.h ${JavaScriptCore_DERIVED_SOURCES_DIR}/InitBytecodes.asm ${JavaScriptCore_DERIVED_SOURCES_DIR}/BytecodeStructs.h ${JavaScriptCore_DERIVED_SOURCES_DIR}/BytecodeIndices.h
+    OUTPUT ${JavaScriptCore_DERIVED_SOURCES_DIR}/Bytecodes.h ${JavaScriptCore_DERIVED_SOURCES_DIR}/InitBytecodes.asm ${JavaScriptCore_DERIVED_SOURCES_DIR}/BytecodeStructs.h ${JavaScriptCore_DERIVED_SOURCES_DIR}/BytecodeIndices.h ${JavaScriptCore_DERIVED_SOURCES_DIR}/WasmLLIntGeneratorInlines.h ${JavaScriptCore_DERIVED_SOURCES_DIR}/InitWasm.asm ${JavaScriptCore_DERIVED_SOURCES_DIR}/BytecodeDumperGenerated.cpp
     MAIN_DEPENDENCY ${JAVASCRIPTCORE_DIR}/generator/main.rb
     DEPENDS ${GENERATOR} bytecode/BytecodeList.rb
-    COMMAND ${RUBY_EXECUTABLE} ${JAVASCRIPTCORE_DIR}/generator/main.rb --bytecodes_h ${JavaScriptCore_DERIVED_SOURCES_DIR}/Bytecodes.h --init_bytecodes_asm ${JavaScriptCore_DERIVED_SOURCES_DIR}/InitBytecodes.asm --bytecode_structs_h ${JavaScriptCore_DERIVED_SOURCES_DIR}/BytecodeStructs.h --bytecode_indices_h ${JavaScriptCore_DERIVED_SOURCES_DIR}/BytecodeIndices.h ${JAVASCRIPTCORE_DIR}/bytecode/BytecodeList.rb
+    COMMAND ${RUBY_EXECUTABLE} ${JAVASCRIPTCORE_DIR}/generator/main.rb --bytecodes_h ${JavaScriptCore_DERIVED_SOURCES_DIR}/Bytecodes.h --init_bytecodes_asm ${JavaScriptCore_DERIVED_SOURCES_DIR}/InitBytecodes.asm --bytecode_structs_h ${JavaScriptCore_DERIVED_SOURCES_DIR}/BytecodeStructs.h --bytecode_indices_h ${JavaScriptCore_DERIVED_SOURCES_DIR}/BytecodeIndices.h ${JAVASCRIPTCORE_DIR}/bytecode/BytecodeList.rb --wasm_json ${JAVASCRIPTCORE_DIR}/wasm/wasm.json --wasm_llint_generator_h ${JavaScriptCore_DERIVED_SOURCES_DIR}/WasmLLIntGeneratorInlines.h --init_wasm_llint ${JavaScriptCore_DERIVED_SOURCES_DIR}/InitWasm.asm --bytecode_dumper ${JavaScriptCore_DERIVED_SOURCES_DIR}/BytecodeDumperGenerated.cpp
     VERBATIM)
 
 
 if (WTF_OS_MAC_OS_X)
     execute_process(COMMAND bash -c "date +'%s'" OUTPUT_VARIABLE BUILD_TIME OUTPUT_STRIP_TRAILING_WHITESPACE)
 else ()
-    set(BUILD_TIME 0)
+    string(TIMESTAMP BUILD_TIME "%s")
 endif ()
 
-file(WRITE ${JavaScriptCore_DERIVED_SOURCES_DIR}/BytecodeCacheVersion.h "#define JSC_BYTECODE_CACHE_VERSION ${BUILD_TIME}\n")
-
 list(APPEND JavaScriptCore_HEADERS
-    ${JavaScriptCore_DERIVED_SOURCES_DIR}/BytecodeCacheVersion.h
     ${JavaScriptCore_DERIVED_SOURCES_DIR}/BytecodeStructs.h
     ${JavaScriptCore_DERIVED_SOURCES_DIR}/Bytecodes.h
 )
@@ -258,16 +256,29 @@ else ()
 endif ()
 
 add_custom_command(
+    OUTPUT ${JavaScriptCore_DERIVED_SOURCES_DIR}/AirOpcode.h ${JavaScriptCore_DERIVED_SOURCES_DIR}/AirOpcodeGenerated.h
+    MAIN_DEPENDENCY ${JAVASCRIPTCORE_DIR}/b3/air/AirOpcode.opcodes
+    DEPENDS ${JAVASCRIPTCORE_DIR}/b3/air/opcode_generator.rb
+    COMMAND ${RUBY_EXECUTABLE} ${JAVASCRIPTCORE_DIR}/b3/air/opcode_generator.rb ${JAVASCRIPTCORE_DIR}/b3/air/AirOpcode.opcodes VERBATIM
+    WORKING_DIRECTORY ${JavaScriptCore_DERIVED_SOURCES_DIR}
+)
+
+list(APPEND JavaScriptCore_HEADERS
+    ${JavaScriptCore_DERIVED_SOURCES_DIR}/AirOpcode.h
+    ${JavaScriptCore_DERIVED_SOURCES_DIR}/AirOpcodeGenerated.h
+)
+
+add_custom_command(
     OUTPUT ${JavaScriptCore_DERIVED_SOURCES_DIR}/LLIntDesiredSettings.h
     MAIN_DEPENDENCY ${JAVASCRIPTCORE_DIR}/offlineasm/generate_settings_extractor.rb
-    DEPENDS ${LLINT_ASM} ${OFFLINE_ASM} ${JavaScriptCore_DERIVED_SOURCES_DIR}/InitBytecodes.asm
+    DEPENDS ${LLINT_ASM} ${OFFLINE_ASM} ${JavaScriptCore_DERIVED_SOURCES_DIR}/InitBytecodes.asm ${JavaScriptCore_DERIVED_SOURCES_DIR}/InitWasm.asm
     COMMAND ${RUBY_EXECUTABLE} ${JAVASCRIPTCORE_DIR}/offlineasm/generate_settings_extractor.rb -I${JavaScriptCore_DERIVED_SOURCES_DIR}/ ${JAVASCRIPTCORE_DIR}/llint/LowLevelInterpreter.asm ${JavaScriptCore_DERIVED_SOURCES_DIR}/LLIntDesiredSettings.h ${OFFLINE_ASM_BACKEND}
     VERBATIM)
 
 add_custom_command(
     OUTPUT ${JavaScriptCore_DERIVED_SOURCES_DIR}/LLIntDesiredOffsets.h
     MAIN_DEPENDENCY ${JAVASCRIPTCORE_DIR}/offlineasm/generate_offset_extractor.rb
-    DEPENDS LLIntSettingsExtractor ${LLINT_ASM} ${OFFLINE_ASM} ${JavaScriptCore_DERIVED_SOURCES_DIR}/InitBytecodes.asm
+    DEPENDS LLIntSettingsExtractor ${LLINT_ASM} ${OFFLINE_ASM} ${JavaScriptCore_DERIVED_SOURCES_DIR}/InitBytecodes.asm ${JavaScriptCore_DERIVED_SOURCES_DIR}/InitWasm.asm ${JavaScriptCore_DERIVED_SOURCES_DIR}/AirOpcode.h ${JavaScriptCore_DERIVED_SOURCES_DIR}/WasmOps.h
     COMMAND ${RUBY_EXECUTABLE} ${JAVASCRIPTCORE_DIR}/offlineasm/generate_offset_extractor.rb -I${JavaScriptCore_DERIVED_SOURCES_DIR}/ ${JAVASCRIPTCORE_DIR}/llint/LowLevelInterpreter.asm $<TARGET_FILE:LLIntSettingsExtractor> ${JavaScriptCore_DERIVED_SOURCES_DIR}/LLIntDesiredOffsets.h ${OFFLINE_ASM_BACKEND}
     VERBATIM)
 
@@ -311,7 +322,7 @@ endif ()
 add_custom_command(
     OUTPUT ${JavaScriptCore_DERIVED_SOURCES_DIR}/${LLIntOutput}
     MAIN_DEPENDENCY ${JAVASCRIPTCORE_DIR}/offlineasm/asm.rb
-    DEPENDS LLIntOffsetsExtractor ${LLINT_ASM} ${OFFLINE_ASM} ${JavaScriptCore_DERIVED_SOURCES_DIR}/InitBytecodes.asm
+    DEPENDS LLIntOffsetsExtractor ${LLINT_ASM} ${OFFLINE_ASM} ${JavaScriptCore_DERIVED_SOURCES_DIR}/InitBytecodes.asm ${JavaScriptCore_DERIVED_SOURCES_DIR}/InitWasm.asm
     COMMAND ${RUBY_EXECUTABLE} ${JAVASCRIPTCORE_DIR}/offlineasm/asm.rb -I${JavaScriptCore_DERIVED_SOURCES_DIR}/ ${JAVASCRIPTCORE_DIR}/llint/LowLevelInterpreter.asm $<TARGET_FILE:LLIntOffsetsExtractor> ${JavaScriptCore_DERIVED_SOURCES_DIR}/${LLIntOutput} ${OFFLINE_ASM_ARGS}
     COMMAND ${CMAKE_COMMAND} -E touch_nocreate ${JavaScriptCore_DERIVED_SOURCES_DIR}/${LLIntOutput}
     WORKING_DIRECTORY ${JavaScriptCore_DERIVED_SOURCES_DIR}
@@ -356,7 +367,6 @@ macro(GENERATE_PYTHON _generator _additional_deps _input _output)
     WEBKIT_ADD_SOURCE_DEPENDENCIES(${_input} ${_output})
 endmacro()
 GENERATE_PYTHON(${CMAKE_CURRENT_SOURCE_DIR}/wasm/generateWasmOpsHeader.py ${CMAKE_CURRENT_SOURCE_DIR}/wasm/generateWasm.py ${CMAKE_CURRENT_SOURCE_DIR}/wasm/wasm.json ${JavaScriptCore_DERIVED_SOURCES_DIR}/WasmOps.h)
-GENERATE_PYTHON(${CMAKE_CURRENT_SOURCE_DIR}/wasm/generateWasmValidateInlinesHeader.py ${CMAKE_CURRENT_SOURCE_DIR}/wasm/generateWasm.py ${CMAKE_CURRENT_SOURCE_DIR}/wasm/wasm.json ${JavaScriptCore_DERIVED_SOURCES_DIR}/WasmValidateInlines.h)
 GENERATE_PYTHON(${CMAKE_CURRENT_SOURCE_DIR}/wasm/generateWasmB3IRGeneratorInlinesHeader.py ${CMAKE_CURRENT_SOURCE_DIR}/wasm/generateWasm.py ${CMAKE_CURRENT_SOURCE_DIR}/wasm/wasm.json ${JavaScriptCore_DERIVED_SOURCES_DIR}/WasmB3IRGeneratorInlines.h)
 
 # LUT generator
@@ -394,6 +404,7 @@ set(JavaScriptCore_PUBLIC_FRAMEWORK_HEADERS
 set(JavaScriptCore_PRIVATE_FRAMEWORK_HEADERS
     ${JavaScriptCore_DERIVED_SOURCES_DIR}/Bytecodes.h
     ${JavaScriptCore_DERIVED_SOURCES_DIR}/JSCBuiltins.h
+    ${JavaScriptCore_DERIVED_SOURCES_DIR}/WasmOps.h
 
     ${JavaScriptCore_DERIVED_SOURCES_DIR}/inspector/InspectorBackendDispatchers.h
     ${JavaScriptCore_DERIVED_SOURCES_DIR}/inspector/InspectorFrontendDispatchers.h
@@ -464,6 +475,10 @@ set(JavaScriptCore_PRIVATE_FRAMEWORK_HEADERS
     assembler/X86Registers.h
     assembler/X86_64Registers.h
 
+    b3/B3Common.h
+    b3/B3Compilation.h
+    b3/B3Type.h
+
     bindings/ScriptFunctionCall.h
     bindings/ScriptObject.h
     bindings/ScriptValue.h
@@ -475,6 +490,7 @@ set(JavaScriptCore_PRIVATE_FRAMEWORK_HEADERS
     bytecode/ArrayProfile.h
     bytecode/ByValInfo.h
     bytecode/BytecodeConventions.h
+    bytecode/BytecodeIndex.h
     bytecode/BytecodeIntrinsicRegistry.h
     bytecode/CallEdge.h
     bytecode/CallLinkInfo.h
@@ -504,6 +520,7 @@ set(JavaScriptCore_PRIVATE_FRAMEWORK_HEADERS
     bytecode/LLIntCallLinkInfo.h
     bytecode/LLIntPrototypeLoadAdaptiveStructureWatchpoint.h
     bytecode/LazyOperandValueProfile.h
+    bytecode/LinkTimeConstant.h
     bytecode/MetadataTable.h
     bytecode/ObjectAllocationProfile.h
     bytecode/ObjectPropertyCondition.h
@@ -511,7 +528,6 @@ set(JavaScriptCore_PRIVATE_FRAMEWORK_HEADERS
     bytecode/OpcodeSize.h
     bytecode/PropertyCondition.h
     bytecode/PutByIdFlags.h
-    bytecode/SpecialPointer.h
     bytecode/SpeculatedType.h
     bytecode/StructureSet.h
     bytecode/SuperSampler.h
@@ -551,6 +567,7 @@ set(JavaScriptCore_PRIVATE_FRAMEWORK_HEADERS
     heap/AllocatorInlines.h
     heap/AllocatorForMode.h
     heap/BlockDirectory.h
+    heap/BlockDirectoryBits.h
     heap/BlockDirectoryInlines.h
     heap/CellAttributes.h
     heap/CellContainer.h
@@ -577,6 +594,7 @@ set(JavaScriptCore_PRIVATE_FRAMEWORK_HEADERS
     heap/GCIncomingRefCountedInlines.h
     heap/GCIncomingRefCountedSet.h
     heap/GCLogging.h
+    heap/GCMemoryOperations.h
     heap/GCRequest.h
     heap/GCSegmentedArray.h
     heap/Handle.h
@@ -584,6 +602,7 @@ set(JavaScriptCore_PRIVATE_FRAMEWORK_HEADERS
     heap/HandleSet.h
     heap/HandleTypes.h
     heap/Heap.h
+    heap/HeapAnalyzer.h
     heap/HeapCell.h
     heap/HeapCellInlines.h
     heap/HeapCellType.h
@@ -593,10 +612,10 @@ set(JavaScriptCore_PRIVATE_FRAMEWORK_HEADERS
     heap/HeapSnapshotBuilder.h
     heap/IncrementalSweeper.h
     heap/IsoCellSet.h
+    heap/IsoHeapCellType.h
     heap/IsoSubspace.h
     heap/IsoSubspaceInlines.h
     heap/IsoSubspacePerVM.h
-    heap/LargeAllocation.h
     heap/LocalAllocator.h
     heap/LocalAllocatorInlines.h
     heap/LockDuringMarking.h
@@ -609,6 +628,7 @@ set(JavaScriptCore_PRIVATE_FRAMEWORK_HEADERS
     heap/MarkingConstraint.h
     heap/MutatorState.h
     heap/PackedCellPtr.h
+    heap/PreciseAllocation.h
     heap/RegisterState.h
     heap/RunningScope.h
     heap/SimpleMarkingConstraint.h
@@ -677,6 +697,7 @@ set(JavaScriptCore_PRIVATE_FRAMEWORK_HEADERS
     interpreter/EntryFrame.h
     interpreter/FrameTracers.h
     interpreter/Register.h
+    interpreter/RegisterInlines.h
     interpreter/ShadowChicken.h
     interpreter/StackVisitor.h
     interpreter/VMEntryRecord.h
@@ -744,12 +765,14 @@ set(JavaScriptCore_PRIVATE_FRAMEWORK_HEADERS
     runtime/AbstractModuleRecord.h
     runtime/ArgList.h
     runtime/ArityCheckMode.h
+    runtime/ArrayConstructor.h
     runtime/ArrayBuffer.h
     runtime/ArrayBufferSharingMode.h
     runtime/ArrayBufferView.h
     runtime/ArrayConventions.h
     runtime/ArrayPrototype.h
     runtime/ArrayStorage.h
+    runtime/ArrayStorageInlines.h
     runtime/AuxiliaryBarrier.h
     runtime/AuxiliaryBarrierInlines.h
     runtime/BasicBlockLocation.h
@@ -762,11 +785,14 @@ set(JavaScriptCore_PRIVATE_FRAMEWORK_HEADERS
     runtime/BytecodeCacheError.h
     runtime/CachePayload.h
     runtime/CacheUpdate.h
+    runtime/CacheableIdentifier.h
+    runtime/CacheableIdentifierInlines.h
     runtime/CachedBytecode.h
     runtime/CachedTypes.h
     runtime/CagedBarrierPtr.h
     runtime/CallData.h
     runtime/CatchScope.h
+    runtime/CellSize.h
     runtime/ClassInfo.h
     runtime/CodeSpecializationKind.h
     runtime/CommonIdentifiers.h
@@ -779,6 +805,7 @@ set(JavaScriptCore_PRIVATE_FRAMEWORK_HEADERS
     runtime/ConstantMode.h
     runtime/ConstructAbility.h
     runtime/ConstructData.h
+    runtime/ConstructorKind.h
     runtime/ControlFlowProfiler.h
     runtime/CustomGetterSetter.h
     runtime/DOMAnnotation.h
@@ -817,6 +844,7 @@ set(JavaScriptCore_PRIVATE_FRAMEWORK_HEADERS
     runtime/GenericTypedArrayView.h
     runtime/GenericTypedArrayViewInlines.h
     runtime/GetPutInfo.h
+    runtime/GetVM.h
     runtime/GlobalExecutable.h
     runtime/HashMapImpl.h
     runtime/Identifier.h
@@ -841,6 +869,7 @@ set(JavaScriptCore_PRIVATE_FRAMEWORK_HEADERS
     runtime/JSArrayBufferView.h
     runtime/JSArrayBufferViewInlines.h
     runtime/JSBigInt.h
+    runtime/JSCConfig.h
     runtime/JSCInlines.h
     runtime/JSCJSValue.h
     runtime/JSCJSValueInlines.h
@@ -864,8 +893,8 @@ set(JavaScriptCore_PRIVATE_FRAMEWORK_HEADERS
     runtime/JSGlobalObjectFunctions.h
     runtime/JSGlobalObjectInlines.h
     runtime/JSImmutableButterfly.h
+    runtime/JSInternalFieldObjectImpl.h
     runtime/JSInternalPromise.h
-    runtime/JSInternalPromiseDeferred.h
     runtime/JSMicrotask.h
     runtime/JSLock.h
     runtime/JSMap.h
@@ -879,7 +908,6 @@ set(JavaScriptCore_PRIVATE_FRAMEWORK_HEADERS
     runtime/JSObjectInlines.h
     runtime/JSPromise.h
     runtime/JSPromiseConstructor.h
-    runtime/JSPromiseDeferred.h
     runtime/JSPropertyNameEnumerator.h
     runtime/JSProxy.h
     runtime/JSRunLoopTimer.h
@@ -917,10 +945,11 @@ set(JavaScriptCore_PRIVATE_FRAMEWORK_HEADERS
     runtime/ObjectPrototype.h
     runtime/Operations.h
     runtime/Options.h
+    runtime/OptionsList.h
     runtime/ParseInt.h
     runtime/PrivateName.h
     runtime/ProgramExecutable.h
-    runtime/PromiseDeferredTimer.h
+    runtime/PromiseTimer.h
     runtime/PropertyDescriptor.h
     runtime/PropertyMapHashTable.h
     runtime/PropertyName.h
@@ -930,6 +959,7 @@ set(JavaScriptCore_PRIVATE_FRAMEWORK_HEADERS
     runtime/PropertyStorage.h
     runtime/Protect.h
     runtime/PrototypeKey.h
+    runtime/ProxyObject.h
     runtime/PureNaN.h
     runtime/PutDirectIndexMode.h
     runtime/PutPropertySlot.h
@@ -996,23 +1026,35 @@ set(JavaScriptCore_PRIVATE_FRAMEWORK_HEADERS
     runtime/WriteBarrier.h
     runtime/WriteBarrierInlines.h
 
+    tools/Integrity.h
+    tools/IntegrityInlines.h
+    tools/VMInspector.h
+    tools/VMInspectorInlines.h
+
+    wasm/WasmCallee.h
     wasm/WasmCapabilities.h
     wasm/WasmCodeBlock.h
+    wasm/WasmCompilationMode.h
     wasm/WasmContext.h
     wasm/WasmEmbedder.h
     wasm/WasmExceptionType.h
     wasm/WasmFaultSignalHandler.h
+    wasm/WasmFormat.h
+    wasm/WasmFunctionCodeBlock.h
     wasm/WasmIndexOrName.h
+    wasm/WasmLLIntTierUpCounter.h
     wasm/WasmMemory.h
+    wasm/WasmMemoryInformation.h
     wasm/WasmMemoryMode.h
     wasm/WasmModule.h
     wasm/WasmName.h
     wasm/WasmNameSection.h
     wasm/WasmPageCount.h
+    wasm/WasmSignature.h
     wasm/WasmTierUpCount.h
 
+    wasm/js/JSWebAssembly.h
     wasm/js/JSWebAssemblyModule.h
-    wasm/js/WebAssemblyPrototype.h
 
 
     yarr/RegularExpression.h
@@ -1099,6 +1141,7 @@ set(JavaScriptCore_INSPECTOR_PROTOCOL_SCRIPTS
 )
 
 set(JavaScriptCore_INSPECTOR_DOMAINS
+    ${JAVASCRIPTCORE_DIR}/inspector/protocol/Animation.json
     ${JAVASCRIPTCORE_DIR}/inspector/protocol/ApplicationCache.json
     ${JAVASCRIPTCORE_DIR}/inspector/protocol/Audit.json
     ${JAVASCRIPTCORE_DIR}/inspector/protocol/CSS.json
@@ -1220,7 +1263,7 @@ set(JavaScriptCore_BUILTINS_SOURCES
     ${JAVASCRIPTCORE_DIR}/builtins/StringPrototype.js
     ${JAVASCRIPTCORE_DIR}/builtins/TypedArrayConstructor.js
     ${JAVASCRIPTCORE_DIR}/builtins/TypedArrayPrototype.js
-    ${JAVASCRIPTCORE_DIR}/builtins/WebAssemblyPrototype.js
+    ${JAVASCRIPTCORE_DIR}/builtins/WebAssembly.js
 )
 
 add_custom_command(
@@ -1235,19 +1278,6 @@ list(APPEND JavaScriptCore_HEADERS
     ${JavaScriptCore_DERIVED_SOURCES_DIR}/inspector/InspectorFrontendDispatchers.h
     ${JavaScriptCore_DERIVED_SOURCES_DIR}/inspector/InspectorProtocolObjects.h
     ${JavaScriptCore_DERIVED_SOURCES_DIR}/JSCBuiltins.h
-)
-
-add_custom_command(
-    OUTPUT ${JavaScriptCore_DERIVED_SOURCES_DIR}/AirOpcode.h ${JavaScriptCore_DERIVED_SOURCES_DIR}/AirOpcodeGenerated.h
-    MAIN_DEPENDENCY ${JAVASCRIPTCORE_DIR}/b3/air/AirOpcode.opcodes
-    DEPENDS ${JAVASCRIPTCORE_DIR}/b3/air/opcode_generator.rb
-    COMMAND ${RUBY_EXECUTABLE} ${JAVASCRIPTCORE_DIR}/b3/air/opcode_generator.rb ${JAVASCRIPTCORE_DIR}/b3/air/AirOpcode.opcodes VERBATIM
-    WORKING_DIRECTORY ${JavaScriptCore_DERIVED_SOURCES_DIR}
-)
-
-list(APPEND JavaScriptCore_HEADERS
-    ${JavaScriptCore_DERIVED_SOURCES_DIR}/AirOpcode.h
-    ${JavaScriptCore_DERIVED_SOURCES_DIR}/AirOpcodeGenerated.h
 )
 
 add_custom_command(
@@ -1307,7 +1337,9 @@ WEBKIT_COPY_FILES(JavaScriptCore_CopyPrivateHeaders
 # dependency of JavaScriptCore for CMake Visual Studio generator to
 # eliminate duplicated custom commands. Otherwise,
 # CombinedDomains.json will be generated in both projects.
-add_dependencies(JavaScriptCore_CopyPrivateHeaders JavaScriptCore)
+if (NOT INTERNAL_BUILD)
+    add_dependencies(JavaScriptCore_CopyPrivateHeaders JavaScriptCore)
+endif ()
 
 target_include_directories(LLIntSettingsExtractor PRIVATE
     ${JavaScriptCore_INCLUDE_DIRECTORIES}

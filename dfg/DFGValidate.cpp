@@ -31,6 +31,7 @@
 #include "CodeBlockWithJITType.h"
 #include "DFGClobberize.h"
 #include "DFGClobbersExitState.h"
+#include "DFGDominators.h"
 #include "DFGMayExit.h"
 #include "JSCInlines.h"
 #include <wtf/Assertions.h>
@@ -758,7 +759,7 @@ private:
                     VALIDATE((node), !"Should not reach SetArgumentMaybe. GetLocal that has data flow that reaches a SetArgumentMaybe is invalid IR.");
                     break;
                 default:
-                    VALIDATE((node), !"Unexecpted node type.");
+                    VALIDATE((node), !"Unexpected node type.");
                     break;
                 }
             }
@@ -775,7 +776,11 @@ private:
         VALIDATE((), !m_graph.m_argumentFormats.isEmpty()); // We always have at least one entrypoint.
         VALIDATE((), m_graph.m_rootToArguments.isEmpty()); // This is only used in CPS.
 
-        for (unsigned entrypointIndex : m_graph.m_entrypointIndexToCatchBytecodeOffset.keys())
+        m_graph.initializeNodeOwners();
+
+        auto& dominators = m_graph.ensureSSADominators();
+
+        for (unsigned entrypointIndex : m_graph.m_entrypointIndexToCatchBytecodeIndex.keys())
             VALIDATE((), entrypointIndex > 0); // By convention, 0 is the entrypoint index for the op_enter entrypoint, which can not be in a catch.
 
         for (BlockIndex blockIndex = 0; blockIndex < m_graph.numBlocks(); ++blockIndex) {
@@ -788,6 +793,8 @@ private:
             bool didSeeExitOK = false;
             bool isOSRExited = false;
             
+            HashSet<Node*> nodesInThisBlock;
+
             for (auto* node : *block) {
                 didSeeExitOK |= node->origin.exitOK;
                 switch (node->op()) {
@@ -906,7 +913,13 @@ private:
                         });
                     break;
                 }
+
                 isOSRExited |= node->isPseudoTerminal();
+
+                m_graph.doToChildren(node, [&] (Edge child) {
+                    VALIDATE((node), dominators.strictlyDominates(child->owner, block) || nodesInThisBlock.contains(child.node()));
+                });
+                nodesInThisBlock.add(node);
             }
         }
     }
