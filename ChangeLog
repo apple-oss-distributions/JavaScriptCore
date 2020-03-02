@@ -1,6 +1,6 @@
 2020-02-27  Alan Coon  <alancoon@apple.com>
 
-        Apply patch. rdar://problem/59870344
+        Apply patch. rdar://problem/59870336
 
     2020-02-27  Justin Michaud  <justin_michaud@apple.com>
 
@@ -37,101 +37,9 @@
             * jit/Repatch.cpp:
             (JSC::tryCachePutByID):
 
-2020-02-24  Alan Coon  <alancoon@apple.com>
+2020-02-24  Kocsen Chung  <kocsen_chung@apple.com>
 
-        Cherry-pick r257134. rdar://problem/59676913
-
-    Make support for bytecode caching more robust against file corruption.
-    https://bugs.webkit.org/show_bug.cgi?id=207972
-    <rdar://problem/59260595>
-    
-    Reviewed by Yusuke Suzuki.
-    
-    If a bytecode cache file is corrupted, we currently will always crash every time
-    we try to read it (in perpetuity as long as the corrupted cache file continues to
-    exist on disk).  To guard against this, we'll harden the bytecode caching mechanism
-    as follows:
-    
-    1. Modify the writeCache operation to always write the cache file in a transactional
-       manner i.e. we'll first write to a .tmp file, and then rename the .tmp file to
-       the cache file only if the entire file has been written in completeness.
-    
-       This ensures that we won't get corrupted cache files due to interrupted writes.
-    
-    2. Modify the writeCache operation to also compute a SHA1 hash of the cache file
-       and append the hash at end of the file.  Modify the readCache operation to
-       first authenticate the SHA1 hash before allowing the cache file to be used.
-       If the hash does not match, the file is bad, and we'll just delete it.
-    
-       This ensures that we won't be crashing while decoding a corrupted cache file.
-    
-    Manually tested with the following scenarios and ensuring that the client recovers
-    with no crashes:
-    
-    1. no cache file on disk.
-    2. a 0-sized cache file on a disk.
-    3. a truncated cache file on disk.
-    4. a corrupted cache file on disk.
-    5. an uncorrupted cache file on disk.
-    
-    Also added some static_asserts in CachedTypes.cpp to document some invariants that
-    the pre-existing code is dependent on.
-    
-    * API/JSScript.mm:
-    (-[JSScript readCache]):
-    (-[JSScript writeCache:]):
-    * runtime/CachedTypes.cpp:
-    
-    
-    
-    git-svn-id: https://svn.webkit.org/repository/webkit/trunk@257134 268f45cc-cd09-0410-ab3c-d52691b4dbfc
-
-    2020-02-20  Mark Lam  <mark.lam@apple.com>
-
-            Make support for bytecode caching more robust against file corruption.
-            https://bugs.webkit.org/show_bug.cgi?id=207972
-            <rdar://problem/59260595>
-
-            Reviewed by Yusuke Suzuki.
-
-            If a bytecode cache file is corrupted, we currently will always crash every time
-            we try to read it (in perpetuity as long as the corrupted cache file continues to
-            exist on disk).  To guard against this, we'll harden the bytecode caching mechanism
-            as follows:
-
-            1. Modify the writeCache operation to always write the cache file in a transactional
-               manner i.e. we'll first write to a .tmp file, and then rename the .tmp file to
-               the cache file only if the entire file has been written in completeness.
-
-               This ensures that we won't get corrupted cache files due to interrupted writes.
-
-            2. Modify the writeCache operation to also compute a SHA1 hash of the cache file
-               and append the hash at end of the file.  Modify the readCache operation to
-               first authenticate the SHA1 hash before allowing the cache file to be used.
-               If the hash does not match, the file is bad, and we'll just delete it.
-
-               This ensures that we won't be crashing while decoding a corrupted cache file.
-
-            Manually tested with the following scenarios and ensuring that the client recovers
-            with no crashes:
-
-            1. no cache file on disk.
-            2. a 0-sized cache file on a disk.
-            3. a truncated cache file on disk.
-            4. a corrupted cache file on disk.
-            5. an uncorrupted cache file on disk.
-
-            Also added some static_asserts in CachedTypes.cpp to document some invariants that
-            the pre-existing code is dependent on.
-
-            * API/JSScript.mm:
-            (-[JSScript readCache]):
-            (-[JSScript writeCache:]):
-            * runtime/CachedTypes.cpp:
-
-2020-02-24  Alan Coon  <alancoon@apple.com>
-
-        Apply patch. rdar://problem/59654271
+        Apply patch. rdar://problem/59654262
 
     2020-02-24  Justin Michaud  <justin_michaud@apple.com>
 
@@ -300,19 +208,11 @@
         (JSC::StructureRareData::StructureRareData):
         * runtime/StructureRareData.h:
 
-2020-02-20  Alan Coon  <alancoon@apple.com>
+2020-02-24  Kocsen Chung  <kocsen_chung@apple.com>
 
-        Revert r256996. rdar://problem/59478911
+        Apply patch. rdar://problem/59654262
 
-2020-02-19  Alan Coon  <alancoon@apple.com>
-
-        Revert r256988. rdar://problem/59478911
-
-2020-02-19  Alan Coon  <alancoon@apple.com>
-
-        Apply patch. rdar://problem/59478911
-
-    2020-02-19  Yusuke Suzuki  <ysuzuki@apple.com>
+    2020-02-24  Yusuke Suzuki  <ysuzuki@apple.com>
 
             [JSC] Compact StructureTransitionTable
             https://bugs.webkit.org/show_bug.cgi?id=207616
@@ -338,325 +238,166 @@
             (JSC::StructureTransitionTable::Hash::hash):
             (JSC::StructureTransitionTable::Hash::equal):
 
-2020-02-19  Russell Epstein  <repstein@apple.com>
+2020-02-24  Kocsen Chung  <kocsen_chung@apple.com>
 
-        Cherry-pick r256898. rdar://problem/59551695
+        Cherry-pick r257134. rdar://problem/59676904
 
-    Unreviewed build fix.
+    Make support for bytecode caching more robust against file corruption.
+    https://bugs.webkit.org/show_bug.cgi?id=207972
+    <rdar://problem/59260595>
     
-    * jit/JITThunks.cpp:
-    (JSC::JITThunks::hostFunctionStub):
+    Reviewed by Yusuke Suzuki.
     
-    git-svn-id: https://svn.webkit.org/repository/webkit/branches/safari-609-branch@256898 268f45cc-cd09-0410-ab3c-d52691b4dbfc
-
-    2020-02-18  Simon Fraser  <simon.fraser@apple.com>
-
-            Unreviewed build fix.
-
-            * jit/JITThunks.cpp:
-            (JSC::JITThunks::hostFunctionStub):
-
-2020-02-19  Russell Epstein  <repstein@apple.com>
-
-        Cherry-pick r256779. rdar://problem/59551695
-
-    [JSC] JITThunk should be HashSet<Weak<NativeExecutable>> with appropriate GC weakness handling
-    https://bugs.webkit.org/show_bug.cgi?id=207715
+    If a bytecode cache file is corrupted, we currently will always crash every time
+    we try to read it (in perpetuity as long as the corrupted cache file continues to
+    exist on disk).  To guard against this, we'll harden the bytecode caching mechanism
+    as follows:
     
-    Reviewed by Darin Adler.
+    1. Modify the writeCache operation to always write the cache file in a transactional
+       manner i.e. we'll first write to a .tmp file, and then rename the .tmp file to
+       the cache file only if the entire file has been written in completeness.
     
-    JSTests:
+       This ensures that we won't get corrupted cache files due to interrupted writes.
     
-    * stress/stress-jitthunks.js: Added.
-    (let.set newGlobal):
-    (set catch):
+    2. Modify the writeCache operation to also compute a SHA1 hash of the cache file
+       and append the hash at end of the file.  Modify the readCache operation to
+       first authenticate the SHA1 hash before allowing the cache file to be used.
+       If the hash does not match, the file is bad, and we'll just delete it.
     
-    Source/JavaScriptCore:
+       This ensures that we won't be crashing while decoding a corrupted cache file.
     
-    This patch refines JITThunks GC-aware Weak hash map for NativeExecutable. Previously, we have
-    HashMap<std::tuple<TaggedNativeFunction, TaggedNativeFunction, String>, Weak<NativeExecutable>> table.
-    But this is not good because the first tuple's information is already in NativeExecutable.
-    But we were using this design since Weak<NativeExecutable> can be nullified because of Weak<>. If this
-    happens, we could have invalid Entry in HashMap which does not have corresponding values. This will
-    cause crash when rehasing requires hash code for this entry.
+    Manually tested with the following scenarios and ensuring that the client recovers
+    with no crashes:
     
-    But this HashMap is very bad in terms of memory usage. Each entry has 32 bytes, and this table gets enough
-    large. We identified that this table is consuming much memory in Membuster. So it is worth designing
-    carefully crafted data structure which only holds Weak<NativeExecutable> by leveraging the deep interaction
-    with our GC implementation.
+    1. no cache file on disk.
+    2. a 0-sized cache file on a disk.
+    3. a truncated cache file on disk.
+    4. a corrupted cache file on disk.
+    5. an uncorrupted cache file on disk.
     
-    This patch implements new design of JITThunks, which uses HashSet<Weak<NativeExecutable>> and carefully crafted
-    HashTraits / KeyTraits to handle Weak<> well.
+    Also added some static_asserts in CachedTypes.cpp to document some invariants that
+    the pre-existing code is dependent on.
     
-    1. Each Weak should have finalizer, and this finalizer should remove dead Weak<NativeExecutable> from HashSet.
-    
-        This is ensuring that all the keys in HashSet is, even if Weak<> is saying it is Dead, it still has an way
-        to access content of NativeExecutable if the content is not a JS objects. For example, we can get function
-        pointer from dead Weak<NativeExecutable> if it is not yet finalized. Since we remove all finalized Weak<>
-        from the table, this finalizer mechanism allows us to access function pointers etc. from Weak<NativeExecutable>
-        so long as it is held in this table.
-    
-    2. Getting NativeExecutable* from JITThunks should have special protocol.
-    
-        When getting NativeExecutable* from JITThunks, we do the following,
-    
-        1. First, we check we have an Entry in JITThunks. If it does not exist, we should insert it anyway.
-            1.1. If it exists, we should check whether this Weak<NativeExecutable> is dead or not. It is possible that
-                 dead one is still in the table because "dead" does not mean that it is "finalized". Until finalizing happens (and
-                 it can be delayed by incremental-sweeper), Weak<NativeExecutable> can be dead but still accessible. So the table
-                 is still holding dead one. If we get dead one, we should insert a new one.
-            1.2. If it is not dead, we return it.
-        2. Second, we create a new NativeExecutable and insert it. In that case, it is possible that the table already has Weak<NativeExecutable>,
-           but it is dead. In that case, we need to explicitly replace it with newly created one since old one is holding old content. If we
-           replaced, finalizer of Weak<> will not be invoked since it immediately deallocates Weak<>. So, it does not happen that this newly
-           inserted NativeExecutable* is removed by the finalizer registered by the old Weak<>.
-    
-    This change makes memory usage of JITThunks table 1/4.
-    
-    * heap/Weak.cpp:
-    (JSC::weakClearSlowCase):
-    * heap/Weak.h:
-    (JSC::Weak::Weak):
-    (JSC::Weak::isHashTableEmptyValue const):
-    (JSC::Weak::unsafeImpl const):
-    (WTF::HashTraits<JSC::Weak<T>>::isEmptyValue):
-    * heap/WeakInlines.h:
-    (JSC::Weak<T>::Weak):
-    * jit/JITThunks.cpp:
-    (JSC::JITThunks::JITThunks):
-    (JSC::JITThunks::WeakNativeExecutableHash::hash):
-    (JSC::JITThunks::WeakNativeExecutableHash::equal):
-    (JSC::JITThunks::HostKeySearcher::hash):
-    (JSC::JITThunks::HostKeySearcher::equal):
-    (JSC::JITThunks::NativeExecutableTranslator::hash):
-    (JSC::JITThunks::NativeExecutableTranslator::equal):
-    (JSC::JITThunks::NativeExecutableTranslator::translate):
-    (JSC::JITThunks::finalize):
-    (JSC::JITThunks::hostFunctionStub):
-    (JSC::JITThunks::clearHostFunctionStubs): Deleted.
-    * jit/JITThunks.h:
-    * runtime/NativeExecutable.h:
-    * tools/JSDollarVM.cpp:
-    (JSC::functionGCSweepAsynchronously):
-    (JSC::functionCreateEmptyFunctionWithName):
-    (JSC::JSDollarVM::finishCreation):
-    
-    git-svn-id: https://svn.webkit.org/repository/webkit/trunk@256779 268f45cc-cd09-0410-ab3c-d52691b4dbfc
-
-    2020-02-17  Yusuke Suzuki  <ysuzuki@apple.com>
-
-            [JSC] JITThunk should be HashSet<Weak<NativeExecutable>> with appropriate GC weakness handling
-            https://bugs.webkit.org/show_bug.cgi?id=207715
-
-            Reviewed by Darin Adler.
-
-            This patch refines JITThunks GC-aware Weak hash map for NativeExecutable. Previously, we have
-            HashMap<std::tuple<TaggedNativeFunction, TaggedNativeFunction, String>, Weak<NativeExecutable>> table.
-            But this is not good because the first tuple's information is already in NativeExecutable.
-            But we were using this design since Weak<NativeExecutable> can be nullified because of Weak<>. If this
-            happens, we could have invalid Entry in HashMap which does not have corresponding values. This will
-            cause crash when rehasing requires hash code for this entry.
-
-            But this HashMap is very bad in terms of memory usage. Each entry has 32 bytes, and this table gets enough
-            large. We identified that this table is consuming much memory in Membuster. So it is worth designing
-            carefully crafted data structure which only holds Weak<NativeExecutable> by leveraging the deep interaction
-            with our GC implementation.
-
-            This patch implements new design of JITThunks, which uses HashSet<Weak<NativeExecutable>> and carefully crafted
-            HashTraits / KeyTraits to handle Weak<> well.
-
-            1. Each Weak should have finalizer, and this finalizer should remove dead Weak<NativeExecutable> from HashSet.
-
-                This is ensuring that all the keys in HashSet is, even if Weak<> is saying it is Dead, it still has an way
-                to access content of NativeExecutable if the content is not a JS objects. For example, we can get function
-                pointer from dead Weak<NativeExecutable> if it is not yet finalized. Since we remove all finalized Weak<>
-                from the table, this finalizer mechanism allows us to access function pointers etc. from Weak<NativeExecutable>
-                so long as it is held in this table.
-
-            2. Getting NativeExecutable* from JITThunks should have special protocol.
-
-                When getting NativeExecutable* from JITThunks, we do the following,
-
-                1. First, we check we have an Entry in JITThunks. If it does not exist, we should insert it anyway.
-                    1.1. If it exists, we should check whether this Weak<NativeExecutable> is dead or not. It is possible that
-                         dead one is still in the table because "dead" does not mean that it is "finalized". Until finalizing happens (and
-                         it can be delayed by incremental-sweeper), Weak<NativeExecutable> can be dead but still accessible. So the table
-                         is still holding dead one. If we get dead one, we should insert a new one.
-                    1.2. If it is not dead, we return it.
-                2. Second, we create a new NativeExecutable and insert it. In that case, it is possible that the table already has Weak<NativeExecutable>,
-                   but it is dead. In that case, we need to explicitly replace it with newly created one since old one is holding old content. If we
-                   replaced, finalizer of Weak<> will not be invoked since it immediately deallocates Weak<>. So, it does not happen that this newly
-                   inserted NativeExecutable* is removed by the finalizer registered by the old Weak<>.
-
-            This change makes memory usage of JITThunks table 1/4.
-
-            * heap/Weak.cpp:
-            (JSC::weakClearSlowCase):
-            * heap/Weak.h:
-            (JSC::Weak::Weak):
-            (JSC::Weak::isHashTableEmptyValue const):
-            (JSC::Weak::unsafeImpl const):
-            (WTF::HashTraits<JSC::Weak<T>>::isEmptyValue):
-            * heap/WeakInlines.h:
-            (JSC::Weak<T>::Weak):
-            * jit/JITThunks.cpp:
-            (JSC::JITThunks::JITThunks):
-            (JSC::JITThunks::WeakNativeExecutableHash::hash):
-            (JSC::JITThunks::WeakNativeExecutableHash::equal):
-            (JSC::JITThunks::HostKeySearcher::hash):
-            (JSC::JITThunks::HostKeySearcher::equal):
-            (JSC::JITThunks::NativeExecutableTranslator::hash):
-            (JSC::JITThunks::NativeExecutableTranslator::equal):
-            (JSC::JITThunks::NativeExecutableTranslator::translate):
-            (JSC::JITThunks::finalize):
-            (JSC::JITThunks::hostFunctionStub):
-            (JSC::JITThunks::clearHostFunctionStubs): Deleted.
-            * jit/JITThunks.h:
-            * runtime/NativeExecutable.h:
-            * tools/JSDollarVM.cpp:
-            (JSC::functionGCSweepAsynchronously):
-            (JSC::functionCreateEmptyFunctionWithName):
-            (JSC::JSDollarVM::finishCreation):
-
-2020-02-19  Russell Epstein  <repstein@apple.com>
-
-        Cherry-pick r256766. rdar://problem/59551706
-
-    [Wasm] REGRESSION(r256665): Wasm->JS call IC needs to save memory size register
-    https://bugs.webkit.org/show_bug.cgi?id=207849
-    
-    Reviewed by Mark Lam.
-    
-    JSTests:
-    
-    * wasm/regress/regress-256665.js: Added.
-    (f):
-    
-    Source/JavaScriptCore:
-    
-    When generating the call IC, we should select the callee saves using BoundsChecking mode in order
-    to obey to the calling conventions described in r256665. Currently, we won't restore the memory size
-    register when calling the Wasm LLInt through the call IC.
-    
-    * wasm/js/WebAssemblyFunction.cpp:
-    (JSC::WebAssemblyFunction::calleeSaves const):
+    * API/JSScript.mm:
+    (-[JSScript readCache]):
+    (-[JSScript writeCache:]):
+    * runtime/CachedTypes.cpp:
     
     
-    git-svn-id: https://svn.webkit.org/repository/webkit/trunk@256766 268f45cc-cd09-0410-ab3c-d52691b4dbfc
+    
+    git-svn-id: https://svn.webkit.org/repository/webkit/trunk@257134 268f45cc-cd09-0410-ab3c-d52691b4dbfc
 
-    2020-02-17  Tadeu Zagallo  <tzagallo@apple.com>
+    2020-02-20  Mark Lam  <mark.lam@apple.com>
 
-            [Wasm] REGRESSION(r256665): Wasm->JS call IC needs to save memory size register
-            https://bugs.webkit.org/show_bug.cgi?id=207849
+            Make support for bytecode caching more robust against file corruption.
+            https://bugs.webkit.org/show_bug.cgi?id=207972
+            <rdar://problem/59260595>
+
+            Reviewed by Yusuke Suzuki.
+
+            If a bytecode cache file is corrupted, we currently will always crash every time
+            we try to read it (in perpetuity as long as the corrupted cache file continues to
+            exist on disk).  To guard against this, we'll harden the bytecode caching mechanism
+            as follows:
+
+            1. Modify the writeCache operation to always write the cache file in a transactional
+               manner i.e. we'll first write to a .tmp file, and then rename the .tmp file to
+               the cache file only if the entire file has been written in completeness.
+
+               This ensures that we won't get corrupted cache files due to interrupted writes.
+
+            2. Modify the writeCache operation to also compute a SHA1 hash of the cache file
+               and append the hash at end of the file.  Modify the readCache operation to
+               first authenticate the SHA1 hash before allowing the cache file to be used.
+               If the hash does not match, the file is bad, and we'll just delete it.
+
+               This ensures that we won't be crashing while decoding a corrupted cache file.
+
+            Manually tested with the following scenarios and ensuring that the client recovers
+            with no crashes:
+
+            1. no cache file on disk.
+            2. a 0-sized cache file on a disk.
+            3. a truncated cache file on disk.
+            4. a corrupted cache file on disk.
+            5. an uncorrupted cache file on disk.
+
+            Also added some static_asserts in CachedTypes.cpp to document some invariants that
+            the pre-existing code is dependent on.
+
+            * API/JSScript.mm:
+            (-[JSScript readCache]):
+            (-[JSScript writeCache:]):
+            * runtime/CachedTypes.cpp:
+
+2020-02-19  Alan Coon  <alancoon@apple.com>
+
+        Apply patch. rdar://problem/59576803
+
+    2020-02-19  Yusuke Suzuki  <ysuzuki@apple.com>
+
+            [JSC] CodeBlock::shrinkToFit should shrink m_constantRegisters and m_constantsSourceCodeRepresentation in 64bit architectures
+            https://bugs.webkit.org/show_bug.cgi?id=207356
 
             Reviewed by Mark Lam.
 
-            When generating the call IC, we should select the callee saves using BoundsChecking mode in order
-            to obey to the calling conventions described in r256665. Currently, we won't restore the memory size
-            register when calling the Wasm LLInt through the call IC.
+            Only 32bit architectures are using m_constantRegisters's address. 64bit architectures are not relying on m_constantRegisters's address.
+            This patches fixes the thing so that CodeBlock::shrinkToFit will shrink m_constantRegisters and m_constantsSourceCodeRepresentation
+            regardless of whether this is EarlyShrink or not. We also move DFG/FTL's LateShrink call to the place after calling DFGCommon reallyAdd
+            since they can add more constant registers.
 
-            * wasm/js/WebAssemblyFunction.cpp:
-            (JSC::WebAssemblyFunction::calleeSaves const):
+            Relanding it by fixing dead-lock.
 
-2020-02-19  Russell Epstein  <repstein@apple.com>
+            * bytecode/CodeBlock.cpp:
+            (JSC::CodeBlock::shrinkToFit):
+            * bytecode/CodeBlock.h:
+            * dfg/DFGJITCompiler.cpp:
+            (JSC::DFG::JITCompiler::compile):
+            (JSC::DFG::JITCompiler::compileFunction):
+            * dfg/DFGJITFinalizer.cpp:
+            (JSC::DFG::JITFinalizer::finalizeCommon):
+            * dfg/DFGPlan.cpp:
+            (JSC::DFG::Plan::compileInThreadImpl):
+            (JSC::DFG::Plan::finalizeWithoutNotifyingCallback):
+            * jit/JIT.cpp:
+            (JSC::JIT::link):
+            * jit/JIT.h:
+            * jit/JITInlines.h:
+            (JSC::JIT::emitLoadDouble):
+            (JSC::JIT::emitLoadInt32ToDouble): Deleted.
 
-        Cherry-pick r256665. rdar://problem/59551715
+2020-01-31  Yusuke Suzuki  <ysuzuki@apple.com>
 
-    [WASM] Wasm interpreter's calling convention doesn't match Wasm JIT's convention.
-    https://bugs.webkit.org/show_bug.cgi?id=207727
-    
-    JSTests:
-    
-    Reviewed by Mark Lam.
-    
-    * wasm/regress/llint-callee-saves-with-fast-memory.js: Added.
-    * wasm/regress/llint-callee-saves-without-fast-memory.js: Added.
-    
-    Source/JavaScriptCore:
-    
-    Reviewed by Mark Lam.
-    
-    The Wasm JIT has unusual calling conventions, which were further complicated by the addition
-    of the interpreter, and the interpreter did not correctly follow these conventions (by incorrectly
-    saving and restoring the callee save registers used for the memory base and size). Here's a summary
-    of the calling convention:
-    
-    - When entering Wasm from JS, the wrapper must:
-        - Preserve the base and size when entering LLInt regardless of the mode. (Prior to this
-          patch we only preserved the base in Signaling mode)
-        - Preserve the memory base in either mode, and the size for BoundsChecking.
-    - Both tiers must preserve every *other* register they use. e.g. the LLInt must preserve PB
-      and wasmInstance, but must *not* preserve memoryBase and memorySize.
-    - Changes to memoryBase and memorySize are visible to the caller. This means that:
-        - Intra-module calls can assume these registers are up-to-date even if the memory was
-          resized. The only exception here is if the LLInt calls a signaling JIT, in which case
-          the JIT will not update the size register, since it won't be using it.
-        - Inter-module and JS calls require the caller to reload these registers. These calls may
-          result in memory changes (e.g. the callee may call memory.grow).
-        - A Signaling JIT caller must be aware that the LLInt may trash the size register, since
-          it always bounds checks.
-    
-    * llint/WebAssembly.asm:
-    * wasm/WasmAirIRGenerator.cpp:
-    (JSC::Wasm::AirIRGenerator::addCall):
-    * wasm/WasmB3IRGenerator.cpp:
-    (JSC::Wasm::B3IRGenerator::addCall):
-    * wasm/WasmCallee.cpp:
-    (JSC::Wasm::LLIntCallee::calleeSaveRegisters):
-    * wasm/WasmCallingConvention.h:
-    * wasm/WasmLLIntPlan.cpp:
-    (JSC::Wasm::LLIntPlan::didCompleteCompilation):
-    * wasm/WasmMemoryInformation.cpp:
-    (JSC::Wasm::PinnedRegisterInfo::get):
-    (JSC::Wasm::getPinnedRegisters): Deleted.
-    
-    
-    git-svn-id: https://svn.webkit.org/repository/webkit/trunk@256665 268f45cc-cd09-0410-ab3c-d52691b4dbfc
+        [JSC] DFG::CommonData::shrinkToFit called before DFG::Plan::reallyAdd is called
+        https://bugs.webkit.org/show_bug.cgi?id=207083
 
-    2020-02-14  Tadeu Zagallo  <tzagallo@apple.com> and Michael Saboff  <msaboff@apple.com>
+        Reviewed by Mark Lam.
 
-            [WASM] Wasm interpreter's calling convention doesn't match Wasm JIT's convention.
-            https://bugs.webkit.org/show_bug.cgi?id=207727
+        We are calling DFG::CommonData::shrinkToFit, but calling this too early: we execute
+        DFG::Plan::reallyAdd(DFG::CommonData*) after that, and this adds many entries to
+        DFG::CommonData*. We should call DFG::CommonData::shrinkToFit after calling DFG::Plan::reallyAdd.
 
-            Reviewed by Mark Lam.
+        To implement it, we make DFG::JITCode::shrinkToFit virtual function in JSC::JITCode. Then, we
+        can also implement FTL::JITCode::shrinkToFit which was previously not implemented.
 
-            The Wasm JIT has unusual calling conventions, which were further complicated by the addition
-            of the interpreter, and the interpreter did not correctly follow these conventions (by incorrectly
-            saving and restoring the callee save registers used for the memory base and size). Here's a summary
-            of the calling convention:
+        * dfg/DFGJITCode.cpp:
+        (JSC::DFG::JITCode::shrinkToFit):
+        * dfg/DFGJITCode.h:
+        * dfg/DFGJITCompiler.cpp:
+        (JSC::DFG::JITCompiler::compile):
+        (JSC::DFG::JITCompiler::compileFunction):
+        * dfg/DFGPlan.cpp:
+        (JSC::DFG::Plan::finalizeWithoutNotifyingCallback):
+        * ftl/FTLJITCode.cpp:
+        (JSC::FTL::JITCode::shrinkToFit):
+        * ftl/FTLJITCode.h:
+        * jit/JITCode.cpp:
+        (JSC::JITCode::shrinkToFit):
+        * jit/JITCode.h:
 
-            - When entering Wasm from JS, the wrapper must:
-                - Preserve the base and size when entering LLInt regardless of the mode. (Prior to this
-                  patch we only preserved the base in Signaling mode)
-                - Preserve the memory base in either mode, and the size for BoundsChecking.
-            - Both tiers must preserve every *other* register they use. e.g. the LLInt must preserve PB
-              and wasmInstance, but must *not* preserve memoryBase and memorySize.
-            - Changes to memoryBase and memorySize are visible to the caller. This means that:
-                - Intra-module calls can assume these registers are up-to-date even if the memory was
-                  resized. The only exception here is if the LLInt calls a signaling JIT, in which case
-                  the JIT will not update the size register, since it won't be using it.
-                - Inter-module and JS calls require the caller to reload these registers. These calls may
-                  result in memory changes (e.g. the callee may call memory.grow).
-                - A Signaling JIT caller must be aware that the LLInt may trash the size register, since
-                  it always bounds checks.
+2020-02-19  Alan Coon  <alancoon@apple.com>
 
-            * llint/WebAssembly.asm:
-            * wasm/WasmAirIRGenerator.cpp:
-            (JSC::Wasm::AirIRGenerator::addCall):
-            * wasm/WasmB3IRGenerator.cpp:
-            (JSC::Wasm::B3IRGenerator::addCall):
-            * wasm/WasmCallee.cpp:
-            (JSC::Wasm::LLIntCallee::calleeSaveRegisters):
-            * wasm/WasmCallingConvention.h:
-            * wasm/WasmLLIntPlan.cpp:
-            (JSC::Wasm::LLIntPlan::didCompleteCompilation):
-            * wasm/WasmMemoryInformation.cpp:
-            (JSC::Wasm::PinnedRegisterInfo::get):
-            (JSC::Wasm::getPinnedRegisters): Deleted.
-
-2020-02-19  Russell Epstein  <repstein@apple.com>
-
-        Apply patch. rdar://problem/59447004
+        Apply patch. rdar://problem/59576778
 
     2020-02-19  Yusuke Suzuki  <ysuzuki@apple.com>
 
@@ -923,70 +664,321 @@
         * llint/LowLevelInterpreter.cpp:
         (JSC::CLoop::execute):
 
-2020-02-19  Russell Epstein  <repstein@apple.com>
+2020-02-19  Alan Coon  <alancoon@apple.com>
 
-        Apply patch. rdar://problem/59446991
+        Cherry-pick r256898. rdar://problem/59576798
 
-    2020-02-19  Yusuke Suzuki  <ysuzuki@apple.com>
+    Unreviewed build fix.
+    
+    * jit/JITThunks.cpp:
+    (JSC::JITThunks::hostFunctionStub):
+    
+    git-svn-id: https://svn.webkit.org/repository/webkit/branches/safari-609-branch@256898 268f45cc-cd09-0410-ab3c-d52691b4dbfc
 
-            [JSC] CodeBlock::shrinkToFit should shrink m_constantRegisters and m_constantsSourceCodeRepresentation in 64bit architectures
-            https://bugs.webkit.org/show_bug.cgi?id=207356
+    2020-02-18  Simon Fraser  <simon.fraser@apple.com>
+
+            Unreviewed build fix.
+
+            * jit/JITThunks.cpp:
+            (JSC::JITThunks::hostFunctionStub):
+
+2020-02-19  Alan Coon  <alancoon@apple.com>
+
+        Cherry-pick r256665. rdar://problem/59576809
+
+    [WASM] Wasm interpreter's calling convention doesn't match Wasm JIT's convention.
+    https://bugs.webkit.org/show_bug.cgi?id=207727
+    
+    JSTests:
+    
+    Reviewed by Mark Lam.
+    
+    * wasm/regress/llint-callee-saves-with-fast-memory.js: Added.
+    * wasm/regress/llint-callee-saves-without-fast-memory.js: Added.
+    
+    Source/JavaScriptCore:
+    
+    Reviewed by Mark Lam.
+    
+    The Wasm JIT has unusual calling conventions, which were further complicated by the addition
+    of the interpreter, and the interpreter did not correctly follow these conventions (by incorrectly
+    saving and restoring the callee save registers used for the memory base and size). Here's a summary
+    of the calling convention:
+    
+    - When entering Wasm from JS, the wrapper must:
+        - Preserve the base and size when entering LLInt regardless of the mode. (Prior to this
+          patch we only preserved the base in Signaling mode)
+        - Preserve the memory base in either mode, and the size for BoundsChecking.
+    - Both tiers must preserve every *other* register they use. e.g. the LLInt must preserve PB
+      and wasmInstance, but must *not* preserve memoryBase and memorySize.
+    - Changes to memoryBase and memorySize are visible to the caller. This means that:
+        - Intra-module calls can assume these registers are up-to-date even if the memory was
+          resized. The only exception here is if the LLInt calls a signaling JIT, in which case
+          the JIT will not update the size register, since it won't be using it.
+        - Inter-module and JS calls require the caller to reload these registers. These calls may
+          result in memory changes (e.g. the callee may call memory.grow).
+        - A Signaling JIT caller must be aware that the LLInt may trash the size register, since
+          it always bounds checks.
+    
+    * llint/WebAssembly.asm:
+    * wasm/WasmAirIRGenerator.cpp:
+    (JSC::Wasm::AirIRGenerator::addCall):
+    * wasm/WasmB3IRGenerator.cpp:
+    (JSC::Wasm::B3IRGenerator::addCall):
+    * wasm/WasmCallee.cpp:
+    (JSC::Wasm::LLIntCallee::calleeSaveRegisters):
+    * wasm/WasmCallingConvention.h:
+    * wasm/WasmLLIntPlan.cpp:
+    (JSC::Wasm::LLIntPlan::didCompleteCompilation):
+    * wasm/WasmMemoryInformation.cpp:
+    (JSC::Wasm::PinnedRegisterInfo::get):
+    (JSC::Wasm::getPinnedRegisters): Deleted.
+    
+    
+    git-svn-id: https://svn.webkit.org/repository/webkit/trunk@256665 268f45cc-cd09-0410-ab3c-d52691b4dbfc
+
+    2020-02-14  Tadeu Zagallo  <tzagallo@apple.com> and Michael Saboff  <msaboff@apple.com>
+
+            [WASM] Wasm interpreter's calling convention doesn't match Wasm JIT's convention.
+            https://bugs.webkit.org/show_bug.cgi?id=207727
 
             Reviewed by Mark Lam.
 
-            Only 32bit architectures are using m_constantRegisters's address. 64bit architectures are not relying on m_constantRegisters's address.
-            This patches fixes the thing so that CodeBlock::shrinkToFit will shrink m_constantRegisters and m_constantsSourceCodeRepresentation
-            regardless of whether this is EarlyShrink or not. We also move DFG/FTL's LateShrink call to the place after calling DFGCommon reallyAdd
-            since they can add more constant registers.
+            The Wasm JIT has unusual calling conventions, which were further complicated by the addition
+            of the interpreter, and the interpreter did not correctly follow these conventions (by incorrectly
+            saving and restoring the callee save registers used for the memory base and size). Here's a summary
+            of the calling convention:
 
-            Relanding it by fixing dead-lock.
+            - When entering Wasm from JS, the wrapper must:
+                - Preserve the base and size when entering LLInt regardless of the mode. (Prior to this
+                  patch we only preserved the base in Signaling mode)
+                - Preserve the memory base in either mode, and the size for BoundsChecking.
+            - Both tiers must preserve every *other* register they use. e.g. the LLInt must preserve PB
+              and wasmInstance, but must *not* preserve memoryBase and memorySize.
+            - Changes to memoryBase and memorySize are visible to the caller. This means that:
+                - Intra-module calls can assume these registers are up-to-date even if the memory was
+                  resized. The only exception here is if the LLInt calls a signaling JIT, in which case
+                  the JIT will not update the size register, since it won't be using it.
+                - Inter-module and JS calls require the caller to reload these registers. These calls may
+                  result in memory changes (e.g. the callee may call memory.grow).
+                - A Signaling JIT caller must be aware that the LLInt may trash the size register, since
+                  it always bounds checks.
 
-            * bytecode/CodeBlock.cpp:
-            (JSC::CodeBlock::shrinkToFit):
-            * bytecode/CodeBlock.h:
-            * dfg/DFGJITCompiler.cpp:
-            (JSC::DFG::JITCompiler::compile):
-            (JSC::DFG::JITCompiler::compileFunction):
-            * dfg/DFGJITFinalizer.cpp:
-            (JSC::DFG::JITFinalizer::finalizeCommon):
-            * dfg/DFGPlan.cpp:
-            (JSC::DFG::Plan::compileInThreadImpl):
-            (JSC::DFG::Plan::finalizeWithoutNotifyingCallback):
-            * jit/JIT.cpp:
-            (JSC::JIT::link):
-            * jit/JIT.h:
-            * jit/JITInlines.h:
-            (JSC::JIT::emitLoadDouble):
-            (JSC::JIT::emitLoadInt32ToDouble): Deleted.
+            * llint/WebAssembly.asm:
+            * wasm/WasmAirIRGenerator.cpp:
+            (JSC::Wasm::AirIRGenerator::addCall):
+            * wasm/WasmB3IRGenerator.cpp:
+            (JSC::Wasm::B3IRGenerator::addCall):
+            * wasm/WasmCallee.cpp:
+            (JSC::Wasm::LLIntCallee::calleeSaveRegisters):
+            * wasm/WasmCallingConvention.h:
+            * wasm/WasmLLIntPlan.cpp:
+            (JSC::Wasm::LLIntPlan::didCompleteCompilation):
+            * wasm/WasmMemoryInformation.cpp:
+            (JSC::Wasm::PinnedRegisterInfo::get):
+            (JSC::Wasm::getPinnedRegisters): Deleted.
 
-2020-01-31  Yusuke Suzuki  <ysuzuki@apple.com>
+2020-02-19  Alan Coon  <alancoon@apple.com>
 
-        [JSC] DFG::CommonData::shrinkToFit called before DFG::Plan::reallyAdd is called
-        https://bugs.webkit.org/show_bug.cgi?id=207083
+        Cherry-pick r256779. rdar://problem/59576798
 
-        Reviewed by Mark Lam.
+    [JSC] JITThunk should be HashSet<Weak<NativeExecutable>> with appropriate GC weakness handling
+    https://bugs.webkit.org/show_bug.cgi?id=207715
+    
+    Reviewed by Darin Adler.
+    
+    JSTests:
+    
+    * stress/stress-jitthunks.js: Added.
+    (let.set newGlobal):
+    (set catch):
+    
+    Source/JavaScriptCore:
+    
+    This patch refines JITThunks GC-aware Weak hash map for NativeExecutable. Previously, we have
+    HashMap<std::tuple<TaggedNativeFunction, TaggedNativeFunction, String>, Weak<NativeExecutable>> table.
+    But this is not good because the first tuple's information is already in NativeExecutable.
+    But we were using this design since Weak<NativeExecutable> can be nullified because of Weak<>. If this
+    happens, we could have invalid Entry in HashMap which does not have corresponding values. This will
+    cause crash when rehasing requires hash code for this entry.
+    
+    But this HashMap is very bad in terms of memory usage. Each entry has 32 bytes, and this table gets enough
+    large. We identified that this table is consuming much memory in Membuster. So it is worth designing
+    carefully crafted data structure which only holds Weak<NativeExecutable> by leveraging the deep interaction
+    with our GC implementation.
+    
+    This patch implements new design of JITThunks, which uses HashSet<Weak<NativeExecutable>> and carefully crafted
+    HashTraits / KeyTraits to handle Weak<> well.
+    
+    1. Each Weak should have finalizer, and this finalizer should remove dead Weak<NativeExecutable> from HashSet.
+    
+        This is ensuring that all the keys in HashSet is, even if Weak<> is saying it is Dead, it still has an way
+        to access content of NativeExecutable if the content is not a JS objects. For example, we can get function
+        pointer from dead Weak<NativeExecutable> if it is not yet finalized. Since we remove all finalized Weak<>
+        from the table, this finalizer mechanism allows us to access function pointers etc. from Weak<NativeExecutable>
+        so long as it is held in this table.
+    
+    2. Getting NativeExecutable* from JITThunks should have special protocol.
+    
+        When getting NativeExecutable* from JITThunks, we do the following,
+    
+        1. First, we check we have an Entry in JITThunks. If it does not exist, we should insert it anyway.
+            1.1. If it exists, we should check whether this Weak<NativeExecutable> is dead or not. It is possible that
+                 dead one is still in the table because "dead" does not mean that it is "finalized". Until finalizing happens (and
+                 it can be delayed by incremental-sweeper), Weak<NativeExecutable> can be dead but still accessible. So the table
+                 is still holding dead one. If we get dead one, we should insert a new one.
+            1.2. If it is not dead, we return it.
+        2. Second, we create a new NativeExecutable and insert it. In that case, it is possible that the table already has Weak<NativeExecutable>,
+           but it is dead. In that case, we need to explicitly replace it with newly created one since old one is holding old content. If we
+           replaced, finalizer of Weak<> will not be invoked since it immediately deallocates Weak<>. So, it does not happen that this newly
+           inserted NativeExecutable* is removed by the finalizer registered by the old Weak<>.
+    
+    This change makes memory usage of JITThunks table 1/4.
+    
+    * heap/Weak.cpp:
+    (JSC::weakClearSlowCase):
+    * heap/Weak.h:
+    (JSC::Weak::Weak):
+    (JSC::Weak::isHashTableEmptyValue const):
+    (JSC::Weak::unsafeImpl const):
+    (WTF::HashTraits<JSC::Weak<T>>::isEmptyValue):
+    * heap/WeakInlines.h:
+    (JSC::Weak<T>::Weak):
+    * jit/JITThunks.cpp:
+    (JSC::JITThunks::JITThunks):
+    (JSC::JITThunks::WeakNativeExecutableHash::hash):
+    (JSC::JITThunks::WeakNativeExecutableHash::equal):
+    (JSC::JITThunks::HostKeySearcher::hash):
+    (JSC::JITThunks::HostKeySearcher::equal):
+    (JSC::JITThunks::NativeExecutableTranslator::hash):
+    (JSC::JITThunks::NativeExecutableTranslator::equal):
+    (JSC::JITThunks::NativeExecutableTranslator::translate):
+    (JSC::JITThunks::finalize):
+    (JSC::JITThunks::hostFunctionStub):
+    (JSC::JITThunks::clearHostFunctionStubs): Deleted.
+    * jit/JITThunks.h:
+    * runtime/NativeExecutable.h:
+    * tools/JSDollarVM.cpp:
+    (JSC::functionGCSweepAsynchronously):
+    (JSC::functionCreateEmptyFunctionWithName):
+    (JSC::JSDollarVM::finishCreation):
+    
+    git-svn-id: https://svn.webkit.org/repository/webkit/trunk@256779 268f45cc-cd09-0410-ab3c-d52691b4dbfc
 
-        We are calling DFG::CommonData::shrinkToFit, but calling this too early: we execute
-        DFG::Plan::reallyAdd(DFG::CommonData*) after that, and this adds many entries to
-        DFG::CommonData*. We should call DFG::CommonData::shrinkToFit after calling DFG::Plan::reallyAdd.
+    2020-02-17  Yusuke Suzuki  <ysuzuki@apple.com>
 
-        To implement it, we make DFG::JITCode::shrinkToFit virtual function in JSC::JITCode. Then, we
-        can also implement FTL::JITCode::shrinkToFit which was previously not implemented.
+            [JSC] JITThunk should be HashSet<Weak<NativeExecutable>> with appropriate GC weakness handling
+            https://bugs.webkit.org/show_bug.cgi?id=207715
 
-        * dfg/DFGJITCode.cpp:
-        (JSC::DFG::JITCode::shrinkToFit):
-        * dfg/DFGJITCode.h:
-        * dfg/DFGJITCompiler.cpp:
-        (JSC::DFG::JITCompiler::compile):
-        (JSC::DFG::JITCompiler::compileFunction):
-        * dfg/DFGPlan.cpp:
-        (JSC::DFG::Plan::finalizeWithoutNotifyingCallback):
-        * ftl/FTLJITCode.cpp:
-        (JSC::FTL::JITCode::shrinkToFit):
-        * ftl/FTLJITCode.h:
-        * jit/JITCode.cpp:
-        (JSC::JITCode::shrinkToFit):
-        * jit/JITCode.h:
+            Reviewed by Darin Adler.
+
+            This patch refines JITThunks GC-aware Weak hash map for NativeExecutable. Previously, we have
+            HashMap<std::tuple<TaggedNativeFunction, TaggedNativeFunction, String>, Weak<NativeExecutable>> table.
+            But this is not good because the first tuple's information is already in NativeExecutable.
+            But we were using this design since Weak<NativeExecutable> can be nullified because of Weak<>. If this
+            happens, we could have invalid Entry in HashMap which does not have corresponding values. This will
+            cause crash when rehasing requires hash code for this entry.
+
+            But this HashMap is very bad in terms of memory usage. Each entry has 32 bytes, and this table gets enough
+            large. We identified that this table is consuming much memory in Membuster. So it is worth designing
+            carefully crafted data structure which only holds Weak<NativeExecutable> by leveraging the deep interaction
+            with our GC implementation.
+
+            This patch implements new design of JITThunks, which uses HashSet<Weak<NativeExecutable>> and carefully crafted
+            HashTraits / KeyTraits to handle Weak<> well.
+
+            1. Each Weak should have finalizer, and this finalizer should remove dead Weak<NativeExecutable> from HashSet.
+
+                This is ensuring that all the keys in HashSet is, even if Weak<> is saying it is Dead, it still has an way
+                to access content of NativeExecutable if the content is not a JS objects. For example, we can get function
+                pointer from dead Weak<NativeExecutable> if it is not yet finalized. Since we remove all finalized Weak<>
+                from the table, this finalizer mechanism allows us to access function pointers etc. from Weak<NativeExecutable>
+                so long as it is held in this table.
+
+            2. Getting NativeExecutable* from JITThunks should have special protocol.
+
+                When getting NativeExecutable* from JITThunks, we do the following,
+
+                1. First, we check we have an Entry in JITThunks. If it does not exist, we should insert it anyway.
+                    1.1. If it exists, we should check whether this Weak<NativeExecutable> is dead or not. It is possible that
+                         dead one is still in the table because "dead" does not mean that it is "finalized". Until finalizing happens (and
+                         it can be delayed by incremental-sweeper), Weak<NativeExecutable> can be dead but still accessible. So the table
+                         is still holding dead one. If we get dead one, we should insert a new one.
+                    1.2. If it is not dead, we return it.
+                2. Second, we create a new NativeExecutable and insert it. In that case, it is possible that the table already has Weak<NativeExecutable>,
+                   but it is dead. In that case, we need to explicitly replace it with newly created one since old one is holding old content. If we
+                   replaced, finalizer of Weak<> will not be invoked since it immediately deallocates Weak<>. So, it does not happen that this newly
+                   inserted NativeExecutable* is removed by the finalizer registered by the old Weak<>.
+
+            This change makes memory usage of JITThunks table 1/4.
+
+            * heap/Weak.cpp:
+            (JSC::weakClearSlowCase):
+            * heap/Weak.h:
+            (JSC::Weak::Weak):
+            (JSC::Weak::isHashTableEmptyValue const):
+            (JSC::Weak::unsafeImpl const):
+            (WTF::HashTraits<JSC::Weak<T>>::isEmptyValue):
+            * heap/WeakInlines.h:
+            (JSC::Weak<T>::Weak):
+            * jit/JITThunks.cpp:
+            (JSC::JITThunks::JITThunks):
+            (JSC::JITThunks::WeakNativeExecutableHash::hash):
+            (JSC::JITThunks::WeakNativeExecutableHash::equal):
+            (JSC::JITThunks::HostKeySearcher::hash):
+            (JSC::JITThunks::HostKeySearcher::equal):
+            (JSC::JITThunks::NativeExecutableTranslator::hash):
+            (JSC::JITThunks::NativeExecutableTranslator::equal):
+            (JSC::JITThunks::NativeExecutableTranslator::translate):
+            (JSC::JITThunks::finalize):
+            (JSC::JITThunks::hostFunctionStub):
+            (JSC::JITThunks::clearHostFunctionStubs): Deleted.
+            * jit/JITThunks.h:
+            * runtime/NativeExecutable.h:
+            * tools/JSDollarVM.cpp:
+            (JSC::functionGCSweepAsynchronously):
+            (JSC::functionCreateEmptyFunctionWithName):
+            (JSC::JSDollarVM::finishCreation):
+
+2020-02-19  Alan Coon  <alancoon@apple.com>
+
+        Cherry-pick r256766. rdar://problem/59576813
+
+    [Wasm] REGRESSION(r256665): Wasm->JS call IC needs to save memory size register
+    https://bugs.webkit.org/show_bug.cgi?id=207849
+    
+    Reviewed by Mark Lam.
+    
+    JSTests:
+    
+    * wasm/regress/regress-256665.js: Added.
+    (f):
+    
+    Source/JavaScriptCore:
+    
+    When generating the call IC, we should select the callee saves using BoundsChecking mode in order
+    to obey to the calling conventions described in r256665. Currently, we won't restore the memory size
+    register when calling the Wasm LLInt through the call IC.
+    
+    * wasm/js/WebAssemblyFunction.cpp:
+    (JSC::WebAssemblyFunction::calleeSaves const):
+    
+    
+    git-svn-id: https://svn.webkit.org/repository/webkit/trunk@256766 268f45cc-cd09-0410-ab3c-d52691b4dbfc
+
+    2020-02-17  Tadeu Zagallo  <tzagallo@apple.com>
+
+            [Wasm] REGRESSION(r256665): Wasm->JS call IC needs to save memory size register
+            https://bugs.webkit.org/show_bug.cgi?id=207849
+
+            Reviewed by Mark Lam.
+
+            When generating the call IC, we should select the callee saves using BoundsChecking mode in order
+            to obey to the calling conventions described in r256665. Currently, we won't restore the memory size
+            register when calling the Wasm LLInt through the call IC.
+
+            * wasm/js/WebAssemblyFunction.cpp:
+            (JSC::WebAssemblyFunction::calleeSaves const):
 
 2020-02-14  Russell Epstein  <repstein@apple.com>
 
