@@ -1,7 +1,7 @@
 /*
  *  Copyright (C) 1999-2000 Harri Porten (porten@kde.org)
  *  Copyright (C) 2001 Peter Kelly (pmk@post.com)
- *  Copyright (C) 2003-2019 Apple Inc. All rights reserved.
+ *  Copyright (C) 2003-2020 Apple Inc. All rights reserved.
  *
  *  This library is free software; you can redistribute it and/or
  *  modify it under the terms of the GNU Lesser General Public
@@ -26,10 +26,12 @@
 #include "HeapCell.h"
 #include "IterationStatus.h"
 #include "WeakSet.h"
+#include <algorithm>
 #include <wtf/Atomics.h>
 #include <wtf/Bitmap.h>
-#include <wtf/HashFunctions.h>
 #include <wtf/CountingLock.h>
+#include <wtf/HashFunctions.h>
+#include <wtf/PageBlock.h>
 #include <wtf/StdLibExtras.h>
 
 namespace JSC {
@@ -70,11 +72,7 @@ public:
     static constexpr size_t atomSize = 16; // bytes
 
     // Block size must be at least as large as the system page size.
-#if CPU(PPC64) || CPU(PPC64LE) || CPU(PPC) || CPU(UNKNOWN)
-    static constexpr size_t blockSize = 64 * KB;
-#else
-    static constexpr size_t blockSize = 16 * KB;
-#endif
+    static constexpr size_t blockSize = std::max(16 * KB, CeilingOnPageSize);
 
     static constexpr size_t blockMask = ~(blockSize - 1); // blockSize must be a power of two.
 
@@ -86,6 +84,8 @@ public:
     static_assert(!(MarkedBlock::atomSize & (MarkedBlock::atomSize - 1)), "MarkedBlock::atomSize must be a power of two.");
     static_assert(!(MarkedBlock::blockSize & (MarkedBlock::blockSize - 1)), "MarkedBlock::blockSize must be a power of two.");
     
+    using AtomsBitmap = Bitmap<atomsPerBlock>;
+
     struct VoidFunctor {
         typedef void ReturnType;
         void returnValue() { }
@@ -205,6 +205,7 @@ public:
         
         void* start() const { return &m_block->atoms()[0]; }
         void* end() const { return &m_block->atoms()[m_endAtom]; }
+        void* atomAt(size_t i) const { return &m_block->atoms()[i]; }
         bool contains(void* p) const { return start() <= p && p < end(); }
 
         void dumpState(PrintStream&);
@@ -296,8 +297,8 @@ public:
         HeapVersion m_markingVersion;
         HeapVersion m_newlyAllocatedVersion;
 
-        Bitmap<atomsPerBlock> m_marks;
-        Bitmap<atomsPerBlock> m_newlyAllocated;
+        AtomsBitmap m_marks;
+        AtomsBitmap m_newlyAllocated;
     };
     
 private:    
@@ -338,7 +339,7 @@ public:
     bool isNewlyAllocated(const void*);
     void setNewlyAllocated(const void*);
     void clearNewlyAllocated(const void*);
-    const Bitmap<atomsPerBlock>& newlyAllocated() const;
+    const AtomsBitmap& newlyAllocated() const;
     
     HeapVersion newlyAllocatedVersion() const { return footer().m_newlyAllocatedVersion; }
     
@@ -352,10 +353,10 @@ public:
     
     bool hasAnyMarked() const;
     void noteMarked();
-#if ASSERT_DISABLED
-    void assertValidCell(VM&, HeapCell*) const { }
-#else
+#if ASSERT_ENABLED
     void assertValidCell(VM&, HeapCell*) const;
+#else
+    void assertValidCell(VM&, HeapCell*) const { }
 #endif
         
     WeakSet& weakSet();
@@ -365,10 +366,10 @@ public:
     
     Dependency aboutToMark(HeapVersion markingVersion);
         
-#if ASSERT_DISABLED
-    void assertMarksNotStale() { }
-#else
+#if ASSERT_ENABLED
     JS_EXPORT_PRIVATE void assertMarksNotStale();
+#else
+    void assertMarksNotStale() { }
 #endif
         
     void resetMarks();
@@ -376,7 +377,7 @@ public:
     bool isMarkedRaw(const void* p);
     HeapVersion markingVersion() const { return footer().m_markingVersion; }
     
-    const Bitmap<atomsPerBlock>& marks() const;
+    const AtomsBitmap& marks() const;
     
     CountingLock& lock() { return footer().m_lock; }
     
@@ -401,6 +402,8 @@ private:
     
     inline bool marksConveyLivenessDuringMarking(HeapVersion markingVersion);
     inline bool marksConveyLivenessDuringMarking(HeapVersion myMarkingVersion, HeapVersion markingVersion);
+
+    friend class FreeList;
 };
 
 inline MarkedBlock::Footer& MarkedBlock::footer()
@@ -687,9 +690,7 @@ struct MarkedBlockHash : PtrHash<JSC::MarkedBlock*> {
     }
 };
 
-template<> struct DefaultHash<JSC::MarkedBlock*> {
-    typedef MarkedBlockHash Hash;
-};
+template<> struct DefaultHash<JSC::MarkedBlock*> : MarkedBlockHash { };
 
 void printInternal(PrintStream& out, JSC::MarkedBlock::Handle::SweepMode);
 

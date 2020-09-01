@@ -150,7 +150,7 @@ class StructureTransitionTable {
         // We encode (2) and (3) into (1)'s empty bits since a pointer is 48bit and lower 3 bits are usable because of alignment.
         struct Key {
             friend struct Hash;
-            static_assert(WTF_CPU_EFFECTIVE_ADDRESS_WIDTH <= 48);
+            static_assert(WTF_OS_CONSTANT_EFFECTIVE_ADDRESS_WIDTH <= 48);
             static constexpr uintptr_t isAdditionMask = 1ULL;
             static constexpr uintptr_t stringMask = ((1ULL << 48) - 1) & (~isAdditionMask);
             static constexpr unsigned attributesShift = 48;
@@ -212,10 +212,10 @@ class StructureTransitionTable {
     struct Hash {
         using Key = std::tuple<UniquedStringImpl*, unsigned, bool>;
         using KeyTraits = HashTraits<Key>;
-
+        
         static unsigned hash(const Key& p)
         {
-            return PtrHash<UniquedStringImpl*>::hash(p.first) + p.second;
+            return PtrHash<UniquedStringImpl*>::hash(std::get<0>(p)) + std::get<1>(p);
         }
 
         static bool equal(const Key& a, const Key& b)

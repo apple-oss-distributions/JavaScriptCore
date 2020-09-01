@@ -28,6 +28,8 @@
 
 #if ENABLE(DFG_JIT)
 
+#include "JSCJSValueInlines.h"
+
 namespace JSC { namespace DFG {
 
 void HeapLocation::dump(PrintStream& out) const
@@ -68,6 +70,10 @@ void printInternal(PrintStream& out, LocationKind kind)
         out.print("IsFunctionLoc");
         return;
         
+    case IsConstructorLoc:
+        out.print("IsConstructorLoc");
+        return;
+
     case GetterLoc:
         out.print("GetterLoc");
         return;
@@ -196,8 +202,8 @@ void printInternal(PrintStream& out, LocationKind kind)
         out.print("WeakMapGetLoc");
         return;
 
-    case PromiseInternalFieldLoc:
-        out.print("PromiseInternalFieldLoc");
+    case InternalFieldObjectLoc:
+        out.print("InternalFieldObjectLoc");
         return;
 
     case DOMStateLoc:

@@ -79,6 +79,12 @@ const char* intrinsicName(Intrinsic intrinsic)
         return "ArrayPopIntrinsic";
     case ArraySliceIntrinsic:
         return "ArraySliceIntrinsic";
+    case ArrayValuesIntrinsic:
+        return "ArrayValuesIntrinsic";
+    case ArrayKeysIntrinsic:
+        return "ArrayKeysIntrinsic";
+    case ArrayEntriesIntrinsic:
+        return "ArrayEntriesIntrinsic";
     case CharCodeAtIntrinsic:
         return "CharCodeAtIntrinsic";
     case CharAtIntrinsic:
@@ -185,6 +191,12 @@ const char* intrinsicName(Intrinsic intrinsic)
         return "FRoundIntrinsic";
     case TruncIntrinsic:
         return "TruncIntrinsic";
+    case TypedArrayValuesIntrinsic:
+        return "TypedArrayValuesIntrinsic";
+    case TypedArrayKeysIntrinsic:
+        return "TypedArrayKeysIntrinsic";
+    case TypedArrayEntriesIntrinsic:
+        return "TypedArrayEntriesIntrinsic";
     case IsTypedArrayViewIntrinsic:
         return "IsTypedArrayViewIntrinsic";
     case BoundFunctionCallIntrinsic:
@@ -195,6 +207,12 @@ const char* intrinsicName(Intrinsic intrinsic)
         return "JSMapHasIntrinsic";
     case JSMapSetIntrinsic:
         return "JSMapSetIntrinsic";
+    case JSMapValuesIntrinsic:
+        return "JSMapValuesIntrinsic";
+    case JSMapKeysIntrinsic:
+        return "JSMapKeysIntrinsic";
+    case JSMapEntriesIntrinsic:
+        return "JSMapEntriesIntrinsic";
     case JSMapBucketHeadIntrinsic:
         return "JSMapBucketHeadIntrinsic";
     case JSMapBucketNextIntrinsic:
@@ -207,6 +225,10 @@ const char* intrinsicName(Intrinsic intrinsic)
         return "JSSetHasIntrinsic";
     case JSSetAddIntrinsic:
         return "JSSetAddIntrinsic";
+    case JSSetValuesIntrinsic:
+        return "JSSetValuesIntrinsic";
+    case JSSetEntriesIntrinsic:
+        return "JSSetEntriesIntrinsic";
     case JSSetBucketHeadIntrinsic:
         return "JSSetBucketHeadIntrinsic";
     case JSSetBucketNextIntrinsic:
@@ -317,6 +339,24 @@ const char* intrinsicName(Intrinsic intrinsic)
     RELEASE_ASSERT_NOT_REACHED();
     return nullptr;
 }
+
+Optional<IterationKind> interationKindForIntrinsic(Intrinsic intrinsic)
+{
+    switch (intrinsic) {
+    case ArrayValuesIntrinsic:
+    case TypedArrayValuesIntrinsic:
+        return IterationKind::Values;
+    case ArrayKeysIntrinsic:
+    case TypedArrayKeysIntrinsic:
+        return IterationKind::Keys;
+    case ArrayEntriesIntrinsic:
+    case TypedArrayEntriesIntrinsic:
+        return IterationKind::Entries;
+    default:
+        return WTF::nullopt;
+    }
+}
+
 
 } // namespace JSC
 
