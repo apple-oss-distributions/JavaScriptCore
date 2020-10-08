@@ -284,10 +284,11 @@ void JIT::privateCompileMainPass()
         DEFINE_SLOW_OP(lesseq)
         DEFINE_SLOW_OP(greater)
         DEFINE_SLOW_OP(greatereq)
-        DEFINE_SLOW_OP(is_function)
+        DEFINE_SLOW_OP(is_callable)
         DEFINE_SLOW_OP(is_constructor)
-        DEFINE_SLOW_OP(is_object_or_null)
         DEFINE_SLOW_OP(typeof)
+        DEFINE_SLOW_OP(typeof_is_object)
+        DEFINE_SLOW_OP(typeof_is_function)
         DEFINE_SLOW_OP(strcat)
         DEFINE_SLOW_OP(push_with_scope)
         DEFINE_SLOW_OP(create_lexical_environment)
@@ -906,8 +907,7 @@ CompilationResult JIT::link()
             auto nextHotPathTarget = CodeLocationLabel<JSInternalPtrTag>(patchBuffer.locationOf<JSInternalPtrTag>(byValCompilationInfo.nextHotPathTarget));
             auto slowPathTarget = CodeLocationLabel<JSInternalPtrTag>(patchBuffer.locationOf<JSInternalPtrTag>(byValCompilationInfo.slowPathTarget));
 
-            *byValCompilationInfo.byValInfo = ByValInfo(
-                byValCompilationInfo.bytecodeIndex,
+            byValCompilationInfo.byValInfo->setUp(
                 notIndexJump,
                 badTypeJump,
                 exceptionHandler,

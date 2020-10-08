@@ -397,6 +397,11 @@ public:
         parseArguments(argc, argv);
     }
 
+    enum CommandLineForWorkersTag { CommandLineForWorkers };
+    CommandLine(CommandLineForWorkersTag)
+    {
+    }
+
     Vector<Script> m_scripts;
     Vector<String> m_arguments;
     String m_profilerOutput;
@@ -633,6 +638,51 @@ private:
         addFunction(vm, "setUnhandledRejectionCallback", functionSetUnhandledRejectionCallback, 1);
 
         addFunction(vm, "asDoubleNumber", functionAsDoubleNumber, 1);
+
+        if (Options::exposeCustomSettersOnGlobalObjectForTesting()) {
+            {
+                CustomGetterSetter* custom = CustomGetterSetter::create(vm, nullptr, testCustomAccessorSetter);
+                Identifier identifier = Identifier::fromString(vm, "testCustomAccessorSetter");
+                this->putDirectCustomAccessor(vm, identifier, custom, PropertyAttribute::DontEnum | PropertyAttribute::DontDelete | PropertyAttribute::CustomAccessor);
+            }
+
+            {
+                CustomGetterSetter* custom = CustomGetterSetter::create(vm, nullptr, testCustomValueSetter);
+                Identifier identifier = Identifier::fromString(vm, "testCustomValueSetter");
+                this->putDirectCustomAccessor(vm, identifier, custom, PropertyAttribute::DontEnum | PropertyAttribute::DontDelete | PropertyAttribute::CustomValue);
+            }
+        }
+    }
+
+    static bool testCustomSetterImpl(JSGlobalObject* lexicalGlobalObject, GlobalObject* thisObject, EncodedJSValue encodedValue, const char* propertyName)
+    {
+        VM& vm = lexicalGlobalObject->vm();
+
+        Identifier identifier = Identifier::fromString(vm, propertyName);
+        thisObject->putDirect(vm, identifier, JSValue::decode(encodedValue), DontEnum);
+
+        return true;
+    }
+
+    static bool testCustomAccessorSetter(JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, EncodedJSValue encodedValue)
+    {
+        VM& vm = lexicalGlobalObject->vm();
+        RELEASE_ASSERT(JSValue::decode(thisValue).isCell());
+        JSCell* thisCell = JSValue::decode(thisValue).asCell();
+        RELEASE_ASSERT(thisCell->type() == PureForwardingProxyType);
+        GlobalObject* thisObject = jsDynamicCast<GlobalObject*>(vm, jsCast<JSProxy*>(thisCell)->target());
+        RELEASE_ASSERT(thisObject);
+        return testCustomSetterImpl(lexicalGlobalObject, thisObject, encodedValue, "_testCustomAccessorSetter");
+    }
+
+    static bool testCustomValueSetter(JSGlobalObject* lexicalGlobalObject, EncodedJSValue thisValue, EncodedJSValue encodedValue)
+    {
+        VM& vm = lexicalGlobalObject->vm();
+        RELEASE_ASSERT(JSValue::decode(thisValue).isCell());
+        JSCell* thisCell = JSValue::decode(thisValue).asCell();
+        GlobalObject* thisObject = jsDynamicCast<GlobalObject*>(vm, thisCell);
+        RELEASE_ASSERT(thisObject);
+        return testCustomSetterImpl(lexicalGlobalObject, thisObject, encodedValue, "_testCustomValueSetter");
     }
     
     void addFunction(VM& vm, JSObject* object, const char* name, NativeFunction function, unsigned arguments)
@@ -1869,7 +1919,7 @@ EncodedJSValue JSC_HOST_CALL functionDollarAgentStart(JSGlobalObject* globalObje
     Thread::create(
         "JSC Agent",
         [sourceCode, &didStartLock, &didStartCondition, &didStart] () {
-            CommandLine commandLine(0, nullptr);
+            CommandLine commandLine(CommandLine::CommandLineForWorkers);
             commandLine.m_interactive = false;
             runJSC(
                 commandLine, true,
@@ -2172,7 +2222,7 @@ EncodedJSValue JSC_HOST_CALL functionEffectful42(JSGlobalObject*, CallFrame*)
 EncodedJSValue JSC_HOST_CALL functionMakeMasquerader(JSGlobalObject* globalObject, CallFrame*)
 {
     VM& vm = globalObject->vm();
-    return JSValue::encode(JSFunction::createFunctionThatMasqueradesAsUndefined(vm, globalObject, 0, "IsHTMLDDA"_s, functionCallMasquerader));
+    return JSValue::encode(InternalFunction::createFunctionThatMasqueradesAsUndefined(vm, globalObject, 0, "IsHTMLDDA"_s, functionCallMasquerader));
 }
 
 EncodedJSValue JSC_HOST_CALL functionCallMasquerader(JSGlobalObject*, CallFrame*)
@@ -3280,7 +3330,7 @@ int runJSC(const CommandLine& options, bool isWorker, const Func& func)
         Options::fireExecutableAllocationFuzzAt() || Options::fireExecutableAllocationFuzzAtOrAfter();
         if (Options::useExecutableAllocationFuzz() && (!fireAtEnabled || Options::verboseExecutableAllocationFuzz()))
             printf("JSC EXECUTABLE ALLOCATION FUZZ: encountered %u checks.\n", numberOfExecutableAllocationFuzzChecks());
-        if (Options::useOSRExitFuzz()) {
+        if (Options::useOSRExitFuzz() && Options::verboseOSRExitFuzz()) {
             printf("JSC OSR EXIT FUZZ: encountered %u static checks.\n", numberOfStaticOSRExitFuzzChecks());
             printf("JSC OSR EXIT FUZZ: encountered %u dynamic checks.\n", numberOfOSRExitFuzzChecks());
         }

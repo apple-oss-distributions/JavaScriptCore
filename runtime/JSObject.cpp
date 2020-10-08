@@ -841,7 +841,7 @@ bool JSObject::putInlineSlow(JSGlobalObject* globalObject, PropertyName property
             JSValue gs = obj->getDirect(offset);
             if (gs.isGetterSetter()) {
                 // We need to make sure that we decide to cache this property before we potentially execute aribitrary JS.
-                if (!this->structure(vm)->isDictionary())
+                if (!this->structure(vm)->isUncacheableDictionary())
                     slot.setCacheableSetter(obj, offset);
 
                 bool result = callSetter(globalObject, slot.thisValue(), gs, value, slot.isStrictMode() ? ECMAMode::strict() : ECMAMode::sloppy());
@@ -849,6 +849,9 @@ bool JSObject::putInlineSlow(JSGlobalObject* globalObject, PropertyName property
                 return result;
             }
             if (gs.isCustomGetterSetter()) {
+                // FIXME: We should only be caching these if we're not an uncacheable dictionary:
+                // https://bugs.webkit.org/show_bug.cgi?id=215347
+
                 // We need to make sure that we decide to cache this property before we potentially execute aribitrary JS.
                 if (attributes & PropertyAttribute::CustomAccessor)
                     slot.setCustomAccessor(obj, jsCast<CustomGetterSetter*>(gs.asCell())->setter());
@@ -1075,7 +1078,7 @@ void JSObject::notifyPresenceOfIndexedAccessors(VM& vm)
     if (mayInterceptIndexedAccesses(vm))
         return;
     
-    setStructure(vm, Structure::nonPropertyTransition(vm, structure(vm), NonPropertyTransition::AddIndexedAccessors));
+    setStructure(vm, Structure::nonPropertyTransition(vm, structure(vm), TransitionKind::AddIndexedAccessors));
     
     if (!mayBePrototype())
         return;
@@ -1107,7 +1110,7 @@ Butterfly* JSObject::createInitialUndecided(VM& vm, unsigned length)
     Butterfly* newButterfly = createInitialIndexedStorage(vm, length);
     StructureID oldStructureID = this->structureID();
     Structure* oldStructure = vm.getStructure(oldStructureID);
-    Structure* newStructure = Structure::nonPropertyTransition(vm, oldStructure, NonPropertyTransition::AllocateUndecided);
+    Structure* newStructure = Structure::nonPropertyTransition(vm, oldStructure, TransitionKind::AllocateUndecided);
     nukeStructureAndSetButterfly(vm, oldStructureID, newButterfly);
     setStructure(vm, newStructure);
     return newButterfly;
@@ -1121,7 +1124,7 @@ ContiguousJSValues JSObject::createInitialInt32(VM& vm, unsigned length)
         newButterfly->contiguous().at(this, i).setWithoutWriteBarrier(JSValue());
     StructureID oldStructureID = this->structureID();
     Structure* oldStructure = vm.getStructure(oldStructureID);
-    Structure* newStructure = Structure::nonPropertyTransition(vm, oldStructure, NonPropertyTransition::AllocateInt32);
+    Structure* newStructure = Structure::nonPropertyTransition(vm, oldStructure, TransitionKind::AllocateInt32);
     nukeStructureAndSetButterfly(vm, oldStructureID, newButterfly);
     setStructure(vm, newStructure);
     return newButterfly->contiguousInt32();
@@ -1135,7 +1138,7 @@ ContiguousDoubles JSObject::createInitialDouble(VM& vm, unsigned length)
         newButterfly->contiguousDouble().at(this, i) = PNaN;
     StructureID oldStructureID = this->structureID();
     Structure* oldStructure = vm.getStructure(oldStructureID);
-    Structure* newStructure = Structure::nonPropertyTransition(vm, oldStructure, NonPropertyTransition::AllocateDouble);
+    Structure* newStructure = Structure::nonPropertyTransition(vm, oldStructure, TransitionKind::AllocateDouble);
     nukeStructureAndSetButterfly(vm, oldStructureID, newButterfly);
     setStructure(vm, newStructure);
     return newButterfly->contiguousDouble();
@@ -1149,7 +1152,7 @@ ContiguousJSValues JSObject::createInitialContiguous(VM& vm, unsigned length)
         newButterfly->contiguous().at(this, i).setWithoutWriteBarrier(JSValue());
     StructureID oldStructureID = this->structureID();
     Structure* oldStructure = vm.getStructure(oldStructureID);
-    Structure* newStructure = Structure::nonPropertyTransition(vm, oldStructure, NonPropertyTransition::AllocateContiguous);
+    Structure* newStructure = Structure::nonPropertyTransition(vm, oldStructure, TransitionKind::AllocateContiguous);
     nukeStructureAndSetButterfly(vm, oldStructureID, newButterfly);
     setStructure(vm, newStructure);
     return newButterfly->contiguous();
@@ -1204,7 +1207,7 @@ ContiguousJSValues JSObject::convertUndecidedToInt32(VM& vm)
     for (unsigned i = butterfly->vectorLength(); i--;)
         butterfly->contiguous().at(this, i).setWithoutWriteBarrier(JSValue());
 
-    setStructure(vm, Structure::nonPropertyTransition(vm, structure(vm), NonPropertyTransition::AllocateInt32));
+    setStructure(vm, Structure::nonPropertyTransition(vm, structure(vm), TransitionKind::AllocateInt32));
     return m_butterfly->contiguousInt32();
 }
 
@@ -1216,7 +1219,7 @@ ContiguousDoubles JSObject::convertUndecidedToDouble(VM& vm)
     for (unsigned i = butterfly->vectorLength(); i--;)
         butterfly->contiguousDouble().at(this, i) = PNaN;
     
-    setStructure(vm, Structure::nonPropertyTransition(vm, structure(vm), NonPropertyTransition::AllocateDouble));
+    setStructure(vm, Structure::nonPropertyTransition(vm, structure(vm), TransitionKind::AllocateDouble));
     return m_butterfly->contiguousDouble();
 }
 
@@ -1229,7 +1232,7 @@ ContiguousJSValues JSObject::convertUndecidedToContiguous(VM& vm)
         butterfly->contiguous().at(this, i).setWithoutWriteBarrier(JSValue());
 
     WTF::storeStoreFence();
-    setStructure(vm, Structure::nonPropertyTransition(vm, structure(vm), NonPropertyTransition::AllocateContiguous));
+    setStructure(vm, Structure::nonPropertyTransition(vm, structure(vm), TransitionKind::AllocateContiguous));
     return m_butterfly->contiguous();
 }
 
@@ -1256,7 +1259,7 @@ ArrayStorage* JSObject::constructConvertedArrayStorageWithoutCopyingElements(VM&
     return newStorage;
 }
 
-ArrayStorage* JSObject::convertUndecidedToArrayStorage(VM& vm, NonPropertyTransition transition)
+ArrayStorage* JSObject::convertUndecidedToArrayStorage(VM& vm, TransitionKind transition)
 {
     DeferGC deferGC(vm.heap);
     ASSERT(hasUndecided(indexingType()));
@@ -1299,7 +1302,7 @@ ContiguousDoubles JSObject::convertInt32ToDouble(VM& vm)
         *currentAsDouble = v.asInt32();
     }
     
-    setStructure(vm, Structure::nonPropertyTransition(vm, structure(vm), NonPropertyTransition::AllocateDouble));
+    setStructure(vm, Structure::nonPropertyTransition(vm, structure(vm), TransitionKind::AllocateDouble));
     return m_butterfly->contiguousDouble();
 }
 
@@ -1307,11 +1310,11 @@ ContiguousJSValues JSObject::convertInt32ToContiguous(VM& vm)
 {
     ASSERT(hasInt32(indexingType()));
     
-    setStructure(vm, Structure::nonPropertyTransition(vm, structure(vm), NonPropertyTransition::AllocateContiguous));
+    setStructure(vm, Structure::nonPropertyTransition(vm, structure(vm), TransitionKind::AllocateContiguous));
     return m_butterfly->contiguous();
 }
 
-ArrayStorage* JSObject::convertInt32ToArrayStorage(VM& vm, NonPropertyTransition transition)
+ArrayStorage* JSObject::convertInt32ToArrayStorage(VM& vm, TransitionKind transition)
 {
     DeferGC deferGC(vm.heap);
     ASSERT(hasInt32(indexingType()));
@@ -1358,11 +1361,11 @@ ContiguousJSValues JSObject::convertDoubleToContiguous(VM& vm)
     }
     
     WTF::storeStoreFence();
-    setStructure(vm, Structure::nonPropertyTransition(vm, structure(vm), NonPropertyTransition::AllocateContiguous));
+    setStructure(vm, Structure::nonPropertyTransition(vm, structure(vm), TransitionKind::AllocateContiguous));
     return m_butterfly->contiguous();
 }
 
-ArrayStorage* JSObject::convertDoubleToArrayStorage(VM& vm, NonPropertyTransition transition)
+ArrayStorage* JSObject::convertDoubleToArrayStorage(VM& vm, TransitionKind transition)
 {
     DeferGC deferGC(vm.heap);
     ASSERT(hasDouble(indexingType()));
@@ -1393,7 +1396,7 @@ ArrayStorage* JSObject::convertDoubleToArrayStorage(VM& vm)
     return convertDoubleToArrayStorage(vm, suggestedArrayStorageTransition(vm));
 }
 
-ArrayStorage* JSObject::convertContiguousToArrayStorage(VM& vm, NonPropertyTransition transition)
+ArrayStorage* JSObject::convertContiguousToArrayStorage(VM& vm, TransitionKind transition)
 {
     DeferGC deferGC(vm.heap);
     ASSERT(hasContiguous(indexingType()));
@@ -1537,17 +1540,17 @@ void JSObject::convertFromCopyOnWrite(VM& vm)
     gcSafeMemcpy(newButterfly->propertyStorage(), oldButterfly->propertyStorage(), oldButterfly->vectorLength() * sizeof(JSValue) + sizeof(IndexingHeader));
 
     WTF::storeStoreFence();
-    NonPropertyTransition transition = ([&] () {
+    TransitionKind transition = ([&] () {
         switch (indexingType()) {
         case ArrayWithInt32:
-            return NonPropertyTransition::AllocateInt32;
+            return TransitionKind::AllocateInt32;
         case ArrayWithDouble:
-            return NonPropertyTransition::AllocateDouble;
+            return TransitionKind::AllocateDouble;
         case ArrayWithContiguous:
-            return NonPropertyTransition::AllocateContiguous;
+            return TransitionKind::AllocateContiguous;
         default:
             RELEASE_ASSERT_NOT_REACHED();
-            return NonPropertyTransition::AllocateContiguous;
+            return TransitionKind::AllocateContiguous;
         }
     })();
     StructureID oldStructureID = structureID();
@@ -1782,24 +1785,24 @@ void JSObject::switchToSlowPutArrayStorage(VM& vm)
         break;
 
     case ALL_UNDECIDED_INDEXING_TYPES:
-        convertUndecidedToArrayStorage(vm, NonPropertyTransition::AllocateSlowPutArrayStorage);
+        convertUndecidedToArrayStorage(vm, TransitionKind::AllocateSlowPutArrayStorage);
         break;
         
     case ALL_INT32_INDEXING_TYPES:
-        convertInt32ToArrayStorage(vm, NonPropertyTransition::AllocateSlowPutArrayStorage);
+        convertInt32ToArrayStorage(vm, TransitionKind::AllocateSlowPutArrayStorage);
         break;
         
     case ALL_DOUBLE_INDEXING_TYPES:
-        convertDoubleToArrayStorage(vm, NonPropertyTransition::AllocateSlowPutArrayStorage);
+        convertDoubleToArrayStorage(vm, TransitionKind::AllocateSlowPutArrayStorage);
         break;
         
     case ALL_CONTIGUOUS_INDEXING_TYPES:
-        convertContiguousToArrayStorage(vm, NonPropertyTransition::AllocateSlowPutArrayStorage);
+        convertContiguousToArrayStorage(vm, TransitionKind::AllocateSlowPutArrayStorage);
         break;
         
     case NonArrayWithArrayStorage:
     case ArrayWithArrayStorage: {
-        Structure* newStructure = Structure::nonPropertyTransition(vm, structure(vm), NonPropertyTransition::SwitchToSlowPutArrayStorage);
+        Structure* newStructure = Structure::nonPropertyTransition(vm, structure(vm), TransitionKind::SwitchToSlowPutArrayStorage);
         setStructure(vm, newStructure);
         break;
     }
@@ -2141,33 +2144,46 @@ bool JSObject::deletePropertyByIndex(JSCell* cell, JSGlobalObject* globalObject,
     }
 }
 
-enum class TypeHintMode { TakesHint, DoesNotTakeHint };
-
-template<TypeHintMode mode = TypeHintMode::DoesNotTakeHint>
+template<CachedSpecialPropertyKey key>
 static ALWAYS_INLINE JSValue callToPrimitiveFunction(JSGlobalObject* globalObject, const JSObject* object, PropertyName propertyName, PreferredPrimitiveType hint)
 {
     VM& vm = globalObject->vm();
     auto scope = DECLARE_THROW_SCOPE(vm);
 
-    PropertySlot slot(object, PropertySlot::InternalMethodType::Get);
-    // FIXME: Remove this when we have fixed: rdar://problem/33451840
-    // https://bugs.webkit.org/show_bug.cgi?id=187109.
-    constexpr bool debugNullStructure = mode == TypeHintMode::TakesHint;
-    bool hasProperty = const_cast<JSObject*>(object)->getPropertySlot<debugNullStructure>(globalObject, propertyName, slot);
-    RETURN_IF_EXCEPTION(scope, scope.exception());
-    JSValue function = hasProperty ? slot.getValue(globalObject, propertyName) : jsUndefined();
-    RETURN_IF_EXCEPTION(scope, scope.exception());
-    if (function.isUndefinedOrNull() && mode == TypeHintMode::TakesHint)
+    JSValue function = object->structure(vm)->cachedSpecialProperty(key);
+    if (!function) {
+        PropertySlot slot(object, PropertySlot::InternalMethodType::Get);
+        // FIXME: Remove this when we have fixed: rdar://problem/33451840
+        // https://bugs.webkit.org/show_bug.cgi?id=187109.
+        constexpr bool debugNullStructure = key == CachedSpecialPropertyKey::ToPrimitive;
+        bool hasProperty = const_cast<JSObject*>(object)->getPropertySlot<debugNullStructure>(globalObject, propertyName, slot);
+        RETURN_IF_EXCEPTION(scope, scope.exception());
+        function = hasProperty ? slot.getValue(globalObject, propertyName) : jsUndefined();
+        RETURN_IF_EXCEPTION(scope, scope.exception());
+        object->structure(vm)->cacheSpecialProperty(globalObject, vm, function, key, slot);
+        RETURN_IF_EXCEPTION(scope, scope.exception());
+    }
+    if (function.isUndefinedOrNull())
         return JSValue();
+
+    // Add optimizations for frequently called functions.
+    // https://bugs.webkit.org/show_bug.cgi?id=216084
+    if constexpr (key == CachedSpecialPropertyKey::ToString) {
+        if (function == globalObject->objectProtoToStringFunction()) {
+            if (auto result = object->structure(vm)->cachedSpecialProperty(CachedSpecialPropertyKey::ToStringTag))
+                return result;
+        }
+    }
+
     auto callData = getCallData(vm, function);
     if (callData.type == CallData::Type::None) {
-        if (mode == TypeHintMode::TakesHint)
+        if constexpr (key == CachedSpecialPropertyKey::ToPrimitive)
             throwTypeError(globalObject, scope, "Symbol.toPrimitive is not a function, undefined, or null"_s);
         return scope.exception();
     }
 
     MarkedArgumentBuffer callArgs;
-    if (mode == TypeHintMode::TakesHint) {
+    if constexpr (key == CachedSpecialPropertyKey::ToPrimitive) {
         JSString* hintString = nullptr;
         switch (hint) {
         case NoPreference:
@@ -2187,8 +2203,11 @@ static ALWAYS_INLINE JSValue callToPrimitiveFunction(JSGlobalObject* globalObjec
     JSValue result = call(globalObject, function, callData, const_cast<JSObject*>(object), callArgs);
     RETURN_IF_EXCEPTION(scope, scope.exception());
     ASSERT(!result.isGetterSetter());
-    if (result.isObject())
-        return mode == TypeHintMode::DoesNotTakeHint ? JSValue() : throwTypeError(globalObject, scope, "Symbol.toPrimitive returned an object"_s);
+    if (result.isObject()) {
+        if constexpr (key == CachedSpecialPropertyKey::ToPrimitive)
+            return throwTypeError(globalObject, scope, "Symbol.toPrimitive returned an object"_s);
+        return JSValue();
+    }
     return result;
 }
 
@@ -2200,25 +2219,27 @@ JSValue JSObject::ordinaryToPrimitive(JSGlobalObject* globalObject, PreferredPri
 
     // Make sure that whatever default value methods there are on object's prototype chain are
     // being watched.
+    // FIXME: Remove this hack for DFG.
+    // https://bugs.webkit.org/show_bug.cgi?id=216117
     for (const JSObject* object = this; object; object = object->structure(vm)->storedPrototypeObject(object))
         object->structure(vm)->startWatchingInternalPropertiesIfNecessary(vm);
 
     JSValue value;
     if (hint == PreferString) {
-        value = callToPrimitiveFunction(globalObject, this, vm.propertyNames->toString, hint);
+        value = callToPrimitiveFunction<CachedSpecialPropertyKey::ToString>(globalObject, this, vm.propertyNames->toString, hint);
         EXCEPTION_ASSERT(!scope.exception() || scope.exception() == value.asCell());
         if (value)
             return value;
-        value = callToPrimitiveFunction(globalObject, this, vm.propertyNames->valueOf, hint);
+        value = callToPrimitiveFunction<CachedSpecialPropertyKey::ValueOf>(globalObject, this, vm.propertyNames->valueOf, hint);
         EXCEPTION_ASSERT(!scope.exception() || scope.exception() == value.asCell());
         if (value)
             return value;
     } else {
-        value = callToPrimitiveFunction(globalObject, this, vm.propertyNames->valueOf, hint);
+        value = callToPrimitiveFunction<CachedSpecialPropertyKey::ValueOf>(globalObject, this, vm.propertyNames->valueOf, hint);
         EXCEPTION_ASSERT(!scope.exception() || scope.exception() == value.asCell());
         if (value)
             return value;
-        value = callToPrimitiveFunction(globalObject, this, vm.propertyNames->toString, hint);
+        value = callToPrimitiveFunction<CachedSpecialPropertyKey::ToString>(globalObject, this, vm.propertyNames->toString, hint);
         EXCEPTION_ASSERT(!scope.exception() || scope.exception() == value.asCell());
         if (value)
             return value;
@@ -2239,7 +2260,7 @@ JSValue JSObject::toPrimitive(JSGlobalObject* globalObject, PreferredPrimitiveTy
     VM& vm = globalObject->vm();
     auto scope = DECLARE_THROW_SCOPE(vm);
 
-    JSValue value = callToPrimitiveFunction<TypeHintMode::TakesHint>(globalObject, this, vm.propertyNames->toPrimitiveSymbol, preferredType);
+    JSValue value = callToPrimitiveFunction<CachedSpecialPropertyKey::ToPrimitive>(globalObject, this, vm.propertyNames->toPrimitiveSymbol, preferredType);
     RETURN_IF_EXCEPTION(scope, { });
     if (value)
         return value;
@@ -3715,6 +3736,16 @@ void JSObject::convertToDictionary(VM& vm)
         vm, Structure::toCacheableDictionaryTransition(vm, structure(vm), &deferredWatchpointFire));
 }
 
+void JSObject::convertToUncacheableDictionary(VM& vm)
+{
+    if (structure(vm)->isUncacheableDictionary())
+        return;
+    DeferredStructureTransitionWatchpointFire deferredWatchpointFire(vm, structure(vm));
+    setStructure(
+        vm, Structure::toUncacheableDictionaryTransition(vm, structure(vm), &deferredWatchpointFire));
+}
+
+
 void JSObject::shiftButterflyAfterFlattening(const GCSafeConcurrentJSLocker&, VM& vm, Structure* structure, size_t outOfLineCapacityAfter)
 {
     // This could interleave visitChildren because some old structure could have been a non
@@ -3901,12 +3932,12 @@ bool JSObject::needsSlowPutIndexing(VM& vm) const
     return anyObjectInChainMayInterceptIndexedAccesses(vm) || globalObject(vm)->isHavingABadTime();
 }
 
-NonPropertyTransition JSObject::suggestedArrayStorageTransition(VM& vm) const
+TransitionKind JSObject::suggestedArrayStorageTransition(VM& vm) const
 {
     if (needsSlowPutIndexing(vm))
-        return NonPropertyTransition::AllocateSlowPutArrayStorage;
+        return TransitionKind::AllocateSlowPutArrayStorage;
     
-    return NonPropertyTransition::AllocateArrayStorage;
+    return TransitionKind::AllocateArrayStorage;
 }
 
 } // namespace JSC

@@ -247,7 +247,7 @@ JSArray* JIT_OPERATION operationObjectKeys(JSGlobalObject* globalObject, Encoded
     JSObject* object = JSValue::decode(encodedObject).toObject(globalObject);
     RETURN_IF_EXCEPTION(scope, nullptr);
     scope.release();
-    return ownPropertyKeys(globalObject, object, PropertyNameMode::Strings, DontEnumPropertiesMode::Exclude);
+    return ownPropertyKeys(globalObject, object, PropertyNameMode::Strings, DontEnumPropertiesMode::Exclude, CachedPropertyNamesKind::Keys);
 }
 
 JSArray* JIT_OPERATION operationObjectKeysObject(JSGlobalObject* globalObject, JSObject* object)
@@ -255,7 +255,28 @@ JSArray* JIT_OPERATION operationObjectKeysObject(JSGlobalObject* globalObject, J
     VM& vm = globalObject->vm();
     CallFrame* callFrame = DECLARE_CALL_FRAME(vm);
     JITOperationPrologueCallFrameTracer tracer(vm, callFrame);
-    return ownPropertyKeys(globalObject, object, PropertyNameMode::Strings, DontEnumPropertiesMode::Exclude);
+    return ownPropertyKeys(globalObject, object, PropertyNameMode::Strings, DontEnumPropertiesMode::Exclude, CachedPropertyNamesKind::Keys);
+}
+
+JSArray* JIT_OPERATION operationObjectGetOwnPropertyNames(JSGlobalObject* globalObject, EncodedJSValue encodedObject)
+{
+    VM& vm = globalObject->vm();
+    CallFrame* callFrame = DECLARE_CALL_FRAME(vm);
+    JITOperationPrologueCallFrameTracer tracer(vm, callFrame);
+    auto scope = DECLARE_THROW_SCOPE(vm);
+
+    JSObject* object = JSValue::decode(encodedObject).toObject(globalObject);
+    RETURN_IF_EXCEPTION(scope, nullptr);
+    scope.release();
+    return ownPropertyKeys(globalObject, object, PropertyNameMode::Strings, DontEnumPropertiesMode::Include, CachedPropertyNamesKind::GetOwnPropertyNames);
+}
+
+JSArray* JIT_OPERATION operationObjectGetOwnPropertyNamesObject(JSGlobalObject* globalObject, JSObject* object)
+{
+    VM& vm = globalObject->vm();
+    CallFrame* callFrame = DECLARE_CALL_FRAME(vm);
+    JITOperationPrologueCallFrameTracer tracer(vm, callFrame);
+    return ownPropertyKeys(globalObject, object, PropertyNameMode::Strings, DontEnumPropertiesMode::Include, CachedPropertyNamesKind::GetOwnPropertyNames);
 }
 
 JSCell* JIT_OPERATION operationObjectCreate(JSGlobalObject* globalObject, EncodedJSValue encodedPrototype)
@@ -2103,7 +2124,7 @@ JSCell* JIT_OPERATION operationCreateRest(JSGlobalObject* globalObject, Register
     return constructArray(globalObject, structure, argumentsToCopyRegion, arraySize);
 }
 
-size_t JIT_OPERATION operationObjectIsObject(JSGlobalObject* globalObject, JSCell* object)
+size_t JIT_OPERATION operationTypeOfIsObject(JSGlobalObject* globalObject, JSCell* object)
 {
     VM& vm = globalObject->vm();
     CallFrame* callFrame = DECLARE_CALL_FRAME(vm);
@@ -2118,7 +2139,18 @@ size_t JIT_OPERATION operationObjectIsObject(JSGlobalObject* globalObject, JSCel
     return true;
 }
 
-size_t JIT_OPERATION operationObjectIsFunction(JSGlobalObject* globalObject, JSCell* object)
+size_t JIT_OPERATION operationTypeOfIsFunction(JSGlobalObject* globalObject, JSCell* object)
+{
+    VM& vm = globalObject->vm();
+    CallFrame* callFrame = DECLARE_CALL_FRAME(vm);
+    JITOperationPrologueCallFrameTracer tracer(vm, callFrame);
+
+    ASSERT(jsDynamicCast<JSObject*>(vm, object));
+
+    return jsTypeofIsFunction(globalObject, object);
+}
+
+size_t JIT_OPERATION operationObjectIsCallable(JSGlobalObject* globalObject, JSCell* object)
 {
     VM& vm = globalObject->vm();
     CallFrame* callFrame = DECLARE_CALL_FRAME(vm);
@@ -2126,11 +2158,7 @@ size_t JIT_OPERATION operationObjectIsFunction(JSGlobalObject* globalObject, JSC
 
     ASSERT(jsDynamicCast<JSObject*>(vm, object));
     
-    if (object->structure(vm)->masqueradesAsUndefined(globalObject))
-        return false;
-    if (object->isCallable(vm))
-        return true;
-    return false;
+    return object->isCallable(vm);
 }
 
 size_t JIT_OPERATION operationIsConstructor(JSGlobalObject* globalObject, EncodedJSValue value)
@@ -2921,7 +2949,7 @@ char* JIT_OPERATION operationNewRawObject(VM* vmPointer, Structure* structure, i
 
     if (structure->type() == JSType::ArrayType)
         return bitwise_cast<char*>(JSArray::createWithButterfly(vm, nullptr, structure, butterfly));
-    return bitwise_cast<char*>(JSFinalObject::create(vm, structure, butterfly));
+    return bitwise_cast<char*>(JSFinalObject::createWithButterfly(vm, structure, butterfly));
 }
 
 JSCell* JIT_OPERATION operationNewObjectWithButterfly(VM* vmPointer, Structure* structure, Butterfly* butterfly)
@@ -2937,7 +2965,7 @@ JSCell* JIT_OPERATION operationNewObjectWithButterfly(VM* vmPointer, Structure* 
     
     if (structure->type() == JSType::ArrayType)
         return JSArray::createWithButterfly(vm, nullptr, structure, butterfly);
-    return JSFinalObject::create(vm, structure, butterfly);
+    return JSFinalObject::createWithButterfly(vm, structure, butterfly);
 }
 
 JSCell* JIT_OPERATION operationNewObjectWithButterflyWithIndexingHeaderAndVectorLength(VM* vmPointer, Structure* structure, unsigned length, Butterfly* butterfly)
@@ -2959,7 +2987,7 @@ JSCell* JIT_OPERATION operationNewObjectWithButterflyWithIndexingHeaderAndVector
     
     if (structure->type() == JSType::ArrayType)
         return JSArray::createWithButterfly(vm, nullptr, structure, butterfly);
-    return JSFinalObject::create(vm, structure, butterfly);
+    return JSFinalObject::createWithButterfly(vm, structure, butterfly);
 }
 
 JSCell* JIT_OPERATION operationNewArrayWithSpreadSlow(JSGlobalObject* globalObject, void* buffer, uint32_t numItems)

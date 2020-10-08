@@ -272,11 +272,8 @@ static EncodedJSValue JSC_HOST_CALL makeBoundFunction(JSGlobalObject* globalObje
     JSObject* target = asObject(callFrame->uncheckedArgument(0));
     JSValue boundThis = callFrame->uncheckedArgument(1);
     JSValue boundArgs = callFrame->uncheckedArgument(2);
-    JSValue lengthValue = callFrame->uncheckedArgument(3);
+    double length = callFrame->uncheckedArgument(3).asNumber();
     JSString* nameString = asString(callFrame->uncheckedArgument(4));
-
-    ASSERT(lengthValue.isInt32AsAnyInt());
-    int32_t length = lengthValue.asInt32AsAnyInt();
 
     RELEASE_AND_RETURN(scope, JSValue::encode(JSBoundFunction::create(vm, globalObject, target, boundThis, boundArgs.isCell() ? jsCast<JSImmutableButterfly*>(boundArgs) : nullptr, length, nameString)));
 }
@@ -607,6 +604,10 @@ void JSGlobalObject::init(VM& vm)
     JSFunction* applyFunction = nullptr;
     JSFunction* hasInstanceSymbolFunction = nullptr;
     m_functionPrototype->addFunctionProperties(vm, this, &callFunction, &applyFunction, &hasInstanceSymbolFunction);
+    m_objectProtoToStringFunction.initLater(
+        [] (const Initializer<JSFunction>& init) {
+            init.set(JSFunction::create(init.vm, init.owner, 0, init.vm.propertyNames->toString.string(), objectProtoFuncToString, NoIntrinsic));
+        });
     m_arrayProtoToStringFunction.initLater(
         [] (const Initializer<JSFunction>& init) {
             init.set(JSFunction::create(init.vm, init.owner, 0, init.vm.propertyNames->toString.string(), arrayProtoFuncToString, NoIntrinsic));
@@ -969,6 +970,14 @@ capitalName ## Constructor* lowerName ## Constructor = featureFlag ? capitalName
     m_iteratorResultObjectStructure.initLater(
         [] (const Initializer<Structure>& init) {
             init.set(createIteratorResultObjectStructure(init.vm, *init.owner));
+        });
+    m_dataPropertyDescriptorObjectStructure.initLater(
+        [] (const Initializer<Structure>& init) {
+            init.set(createDataPropertyDescriptorObjectStructure(init.vm, *init.owner));
+        });
+    m_accessorPropertyDescriptorObjectStructure.initLater(
+        [] (const Initializer<Structure>& init) {
+            init.set(createAccessorPropertyDescriptorObjectStructure(init.vm, *init.owner));
         });
     
     m_evalFunction.initLater(
@@ -1859,6 +1868,7 @@ void JSGlobalObject::visitChildren(JSCell* cell, SlotVisitor& visitor)
 
     thisObject->m_parseIntFunction.visit(visitor);
     thisObject->m_parseFloatFunction.visit(visitor);
+    thisObject->m_objectProtoToStringFunction.visit(visitor);
     thisObject->m_arrayProtoToStringFunction.visit(visitor);
     thisObject->m_arrayProtoValuesFunction.visit(visitor);
     thisObject->m_evalFunction.visit(visitor);
@@ -1935,6 +1945,8 @@ void JSGlobalObject::visitChildren(JSCell* cell, SlotVisitor& visitor)
     visitor.append(thisObject->m_mapIteratorStructure);
     visitor.append(thisObject->m_setIteratorStructure);
     thisObject->m_iteratorResultObjectStructure.visit(visitor);
+    thisObject->m_dataPropertyDescriptorObjectStructure.visit(visitor);
+    thisObject->m_accessorPropertyDescriptorObjectStructure.visit(visitor);
     visitor.append(thisObject->m_regExpMatchesArrayStructure);
     thisObject->m_moduleRecordStructure.visit(visitor);
     thisObject->m_moduleNamespaceObjectStructure.visit(visitor);

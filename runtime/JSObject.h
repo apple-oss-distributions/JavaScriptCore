@@ -84,12 +84,6 @@ extern JS_EXPORT_PRIVATE const ASCIILiteral UnconfigurablePropertyChangeConfigur
 extern JS_EXPORT_PRIVATE const ASCIILiteral UnconfigurablePropertyChangeEnumerabilityError;
 extern JS_EXPORT_PRIVATE const ASCIILiteral UnconfigurablePropertyChangeWritabilityError;
 
-COMPILE_ASSERT(PropertyAttribute::None < FirstInternalAttribute, None_is_below_FirstInternalAttribute);
-COMPILE_ASSERT(PropertyAttribute::ReadOnly < FirstInternalAttribute, ReadOnly_is_below_FirstInternalAttribute);
-COMPILE_ASSERT(PropertyAttribute::DontEnum < FirstInternalAttribute, DontEnum_is_below_FirstInternalAttribute);
-COMPILE_ASSERT(PropertyAttribute::DontDelete < FirstInternalAttribute, DontDelete_is_below_FirstInternalAttribute);
-COMPILE_ASSERT(PropertyAttribute::Accessor < FirstInternalAttribute, Accessor_is_below_FirstInternalAttribute);
-
 class JSFinalObject;
 
 #if ASSERT_ENABLED
@@ -824,7 +818,7 @@ public:
     bool needsSlowPutIndexing(VM&) const;
 
 private:
-    NonPropertyTransition suggestedArrayStorageTransition(VM&) const;
+    TransitionKind suggestedArrayStorageTransition(VM&) const;
 public:
     // You should only call isStructureExtensible() when:
     // - Performing this check in a way that isn't described in the specification 
@@ -857,6 +851,7 @@ public:
     void setStructure(VM&, Structure*);
 
     JS_EXPORT_PRIVATE void convertToDictionary(VM&);
+    JS_EXPORT_PRIVATE void convertToUncacheableDictionary(VM&);
 
     void flattenDictionaryObject(VM& vm)
     {
@@ -1032,19 +1027,19 @@ protected:
     ContiguousJSValues convertUndecidedToInt32(VM&);
     ContiguousDoubles convertUndecidedToDouble(VM&);
     ContiguousJSValues convertUndecidedToContiguous(VM&);
-    ArrayStorage* convertUndecidedToArrayStorage(VM&, NonPropertyTransition);
+    ArrayStorage* convertUndecidedToArrayStorage(VM&, TransitionKind);
     ArrayStorage* convertUndecidedToArrayStorage(VM&);
         
     ContiguousDoubles convertInt32ToDouble(VM&);
     ContiguousJSValues convertInt32ToContiguous(VM&);
-    ArrayStorage* convertInt32ToArrayStorage(VM&, NonPropertyTransition);
+    ArrayStorage* convertInt32ToArrayStorage(VM&, TransitionKind);
     ArrayStorage* convertInt32ToArrayStorage(VM&);
 
     ContiguousJSValues convertDoubleToContiguous(VM&);
-    ArrayStorage* convertDoubleToArrayStorage(VM&, NonPropertyTransition);
+    ArrayStorage* convertDoubleToArrayStorage(VM&, TransitionKind);
     ArrayStorage* convertDoubleToArrayStorage(VM&);
         
-    ArrayStorage* convertContiguousToArrayStorage(VM&, NonPropertyTransition);
+    ArrayStorage* convertContiguousToArrayStorage(VM&, TransitionKind);
     ArrayStorage* convertContiguousToArrayStorage(VM&);
 
         
@@ -1209,7 +1204,8 @@ public:
         return (maxSize - allocationSize(0)) / sizeof(WriteBarrier<Unknown>);
     }
 
-    static JSFinalObject* create(VM&, Structure*, Butterfly* = nullptr);
+    static JSFinalObject* create(VM&, Structure*);
+    static JSFinalObject* createWithButterfly(VM&, Structure*, Butterfly*);
     static Structure* createStructure(VM& vm, JSGlobalObject* globalObject, JSValue prototype, unsigned inlineCapacity)
     {
         return Structure::create(vm, globalObject, prototype, typeInfo(), info(), defaultIndexingType, inlineCapacity);
@@ -1224,7 +1220,7 @@ private:
 
     void visitChildrenCommon(SlotVisitor&);
 
-    explicit JSFinalObject(VM& vm, Structure* structure, Butterfly* butterfly = nullptr)
+    explicit JSFinalObject(VM& vm, Structure* structure, Butterfly* butterfly)
         : JSObject(vm, structure, butterfly)
     {
         gcSafeZeroMemory(inlineStorageUnsafe(), structure->inlineCapacity() * sizeof(EncodedJSValue));
@@ -1233,17 +1229,17 @@ private:
     void finishCreation(VM& vm)
     {
         Base::finishCreation(vm);
-        ASSERT(structure(vm)->totalStorageCapacity() == structure(vm)->inlineCapacity());
+        ASSERT(butterfly() || structure(vm)->totalStorageCapacity() == structure(vm)->inlineCapacity());
         ASSERT(classInfo(vm));
     }
 };
 
 JS_EXPORT_PRIVATE EncodedJSValue JSC_HOST_CALL objectPrivateFuncInstanceOf(JSGlobalObject*, CallFrame*);
 
-inline JSFinalObject* JSFinalObject::create(VM& vm, Structure* structure, Butterfly* butterfly)
+inline JSFinalObject* JSFinalObject::createWithButterfly(VM& vm, Structure* structure, Butterfly* butterfly)
 {
     JSFinalObject* finalObject = new (
-        NotNull, 
+        NotNull,
         allocateCell<JSFinalObject>(
             vm.heap,
             allocationSize(structure->inlineCapacity())
@@ -1251,6 +1247,11 @@ inline JSFinalObject* JSFinalObject::create(VM& vm, Structure* structure, Butter
     ) JSFinalObject(vm, structure, butterfly);
     finalObject->finishCreation(vm);
     return finalObject;
+}
+
+inline JSFinalObject* JSFinalObject::create(VM& vm, Structure* structure)
+{
+    return createWithButterfly(vm, structure, nullptr);
 }
 
 inline size_t JSObject::offsetOfInlineStorage()

@@ -135,9 +135,9 @@ constexpr bool enableWebAssemblyStreamingApi = false;
     v(OptionRange, bytecodeRangeToJITCompile, 0, Normal, "bytecode size range to allow compilation on, e.g. 1:100") \
     v(OptionRange, bytecodeRangeToDFGCompile, 0, Normal, "bytecode size range to allow DFG compilation on, e.g. 1:100") \
     v(OptionRange, bytecodeRangeToFTLCompile, 0, Normal, "bytecode size range to allow FTL compilation on, e.g. 1:100") \
-    v(OptionString, jitAllowlist, nullptr, Normal, "file with newline separated list of function signatures to allow compilation on") \
-    v(OptionString, dfgAllowlist, nullptr, Normal, "file with newline separated list of function signatures to allow DFG compilation on") \
-    v(OptionString, ftlAllowlist, nullptr, Normal, "file with newline separated list of function signatures to allow FTL compilation on") \
+    v(OptionString, jitAllowlist, nullptr, Normal, "file with newline separated list of function signatures to allow compilation on or, if no such file exists, the function signature to allow") \
+    v(OptionString, dfgAllowlist, nullptr, Normal, "file with newline separated list of function signatures to allow DFG compilation on or, if no such file exists, the function signature to allow") \
+    v(OptionString, ftlAllowlist, nullptr, Normal, "file with newline separated list of function signatures to allow FTL compilation on or, if no such file exists, the function signature to allow") \
     v(Bool, dumpSourceAtDFGTime, false, Normal, "dumps source code of JS function being DFG compiled") \
     v(Bool, dumpBytecodeAtDFGTime, false, Normal, "dumps bytecode of JS function being DFG compiled") \
     v(Bool, dumpGraphAfterParsing, false, Normal, nullptr) \
@@ -396,6 +396,7 @@ constexpr bool enableWebAssemblyStreamingApi = false;
     v(Unsigned, fireOSRExitFuzzAtStatic, 0, Normal, nullptr) \
     v(Unsigned, fireOSRExitFuzzAt, 0, Normal, nullptr) \
     v(Unsigned, fireOSRExitFuzzAtOrAfter, 0, Normal, nullptr) \
+    v(Bool, verboseOSRExitFuzz, true, Normal, nullptr) \
     \
     v(Unsigned, seedOfVMRandomForFuzzer, 0, Normal, "0 means not fuzzing this; use a cryptographically random seed") \
     v(Bool, useRandomizingFuzzerAgent, false, Normal, nullptr) \
@@ -518,6 +519,7 @@ constexpr bool enableWebAssemblyStreamingApi = false;
     v(Bool, useLICMFuzzing, false, Normal, nullptr) \
     v(Unsigned, seedForLICMFuzzer, 424242, Normal, nullptr) \
     v(Double, allowHoistingLICMProbability, 0.5, Normal, nullptr) \
+    v(Bool, exposeCustomSettersOnGlobalObjectForTesting, false, Normal, nullptr) \
 
 enum OptionEquivalence {
     SameOption,
