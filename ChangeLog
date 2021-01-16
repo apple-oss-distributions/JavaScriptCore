@@ -1,6 +1,6 @@
 2021-01-15  Russell Epstein  <repstein@apple.com>
 
-        Cherry-pick r271544. rdar://problem/73267289
+        Cherry-pick r271544. rdar://problem/73267306
 
     [JSC] Clean up DFGPreciseLocalClobberize to avoid duplicate code
     https://bugs.webkit.org/show_bug.cgi?id=220670
@@ -26,9 +26,9 @@
             * dfg/DFGPreciseLocalClobberize.h:
             (JSC::DFG::PreciseLocalClobberizeAdaptor::readTop):
 
-2021-01-08  Kocsen Chung  <kocsen_chung@apple.com>
+2021-01-08  Alan Coon  <alancoon@apple.com>
 
-        Cherry-pick r271144. rdar://problem/72935400
+        Cherry-pick r271144. rdar://problem/72935460
 
     propertyNameEnumerator must check it can still take the fast path after getGenericPropertyNames
     https://bugs.webkit.org/show_bug.cgi?id=219957
