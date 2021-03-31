@@ -40,6 +40,10 @@
 
 namespace JSC { namespace Yarr {
 
+#if CPU(ARM64E)
+JSC_ANNOTATE_JIT_OPERATION(_JITTarget_vmEntryToYarrJITAfter, vmEntryToYarrJITAfter);
+#endif
+
 MatchingContextHolder::MatchingContextHolder(VM& vm, YarrCodeBlock* yarrCodeBlock, MatchFrom matchFrom)
     : m_vm(vm)
 {
@@ -2821,17 +2825,17 @@ class YarrGenerator final : public YarrJITInfo, private MacroAssembler {
                 if (onceThrough)
                     m_backtrackingState.linkTo(endOp.m_reentry, this);
                 else {
-                    // If we don't need to move the input poistion, and the pattern has a fixed size
-                    // (in which case we omit the store of the start index until the pattern has matched)
-                    // then we can just link the backtrack out of the last alternative straight to the
-                    // head of the first alternative.
-                    if (m_pattern.m_body->m_hasFixedSize
-                        && (alternative->m_minimumSize > beginOp->m_alternative->m_minimumSize)
-                        && (alternative->m_minimumSize - beginOp->m_alternative->m_minimumSize == 1))
-                        m_backtrackingState.linkTo(beginOp->m_reentry, this);
-                    else if (m_pattern.sticky() && m_ops[op.m_nextOp].m_op == OpBodyAlternativeEnd) {
+                    if (m_pattern.sticky() && m_ops[op.m_nextOp].m_op == OpBodyAlternativeEnd) {
                         // It is a sticky pattern and the last alternative failed, jump to the end.
                         m_backtrackingState.takeBacktracksToJumpList(lastStickyAlternativeFailures, this);
+                    } else if (m_pattern.m_body->m_hasFixedSize
+                        && (alternative->m_minimumSize > beginOp->m_alternative->m_minimumSize)
+                        && (alternative->m_minimumSize - beginOp->m_alternative->m_minimumSize == 1)) {
+                        // If we don't need to move the input position, and the pattern has a fixed size
+                        // (in which case we omit the store of the start index until the pattern has matched)
+                        // then we can just link the backtrack out of the last alternative straight to the
+                        // head of the first alternative.
+                        m_backtrackingState.linkTo(beginOp->m_reentry, this);
                     } else {
                         // We need to generate a trampoline of code to execute before looping back
                         // around to the first alternative.
@@ -3746,9 +3750,11 @@ class YarrGenerator final : public YarrJITInfo, private MacroAssembler {
         push(X86Registers::ecx);
 #endif
 #elif CPU(ARM64)
-        tagReturnAddress();
+        if (!Options::useJITCage())
+            tagReturnAddress();
         if (m_decodeSurrogatePairs) {
-            pushPair(framePointerRegister, linkRegister);
+            if (!Options::useJITCage())
+                pushPair(framePointerRegister, linkRegister);
             move(TrustedImm32(0x10000), supplementaryPlanesBase);
             move(TrustedImm32(0xd800), leadingSurrogateTag);
             move(TrustedImm32(0xdc00), trailingSurrogateTag);
@@ -3803,8 +3809,10 @@ class YarrGenerator final : public YarrJITInfo, private MacroAssembler {
             pop(X86Registers::ebx);
         pop(X86Registers::ebp);
 #elif CPU(ARM64)
-        if (m_decodeSurrogatePairs)
-            popPair(framePointerRegister, linkRegister);
+        if (m_decodeSurrogatePairs) {
+            if (!Options::useJITCage())
+                popPair(framePointerRegister, linkRegister);
+        }
 #elif CPU(ARM_THUMB2)
         pop(ARMRegisters::r8);
         pop(ARMRegisters::r6);
@@ -3813,7 +3821,15 @@ class YarrGenerator final : public YarrJITInfo, private MacroAssembler {
 #elif CPU(MIPS)
         // Do nothing
 #endif
+
+#if CPU(ARM64E)
+        if (Options::useJITCage())
+            farJump(TrustedImmPtr(retagCodePtr<void*, CFunctionPtrTag, OperationPtrTag>(&vmEntryToYarrJITAfter)), OperationPtrTag);
+        else
+            ret();
+#else
         ret();
+#endif
     }
 
 public:

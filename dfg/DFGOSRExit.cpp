@@ -140,7 +140,7 @@ void OSRExit::emitRestoreArguments(CCallHelpers& jit, VM& vm, const Operands<Val
     }
 }
 
-void JIT_OPERATION operationCompileOSRExit(CallFrame* callFrame)
+JSC_DEFINE_JIT_OPERATION(operationCompileOSRExit, void, (CallFrame* callFrame))
 {
     VM& vm = callFrame->deprecatedVM();
     auto scope = DECLARE_THROW_SCOPE(vm);
@@ -593,7 +593,7 @@ void OSRExit::compileExit(CCallHelpers& jit, VM& vm, const OSRExit& exit, const 
         VM* vmPtr = &vm;
         auto* tmpScratch = scratch + operands.tmpIndex(0);
         jit.probe([=, values = WTFMove(values)] (Probe::Context& context) {
-            Vector<std::unique_ptr<CheckpointOSRExitSideState>> sideStates;
+            Vector<std::unique_ptr<CheckpointOSRExitSideState>, VM::expectedMaxActiveSideStateCount> sideStates;
             sideStates.reserveInitialCapacity(exit.m_codeOrigin.inlineDepth());
             auto sideStateCommitter = makeScopeExit([&] {
                 for (size_t i = sideStates.size(); i--;)
@@ -878,7 +878,7 @@ void OSRExit::compileExit(CCallHelpers& jit, VM& vm, const OSRExit& exit, const 
     adjustAndJumpToTarget(vm, jit, exit);
 }
 
-void JIT_OPERATION operationDebugPrintSpeculationFailure(CallFrame* callFrame, void* debugInfoRaw, void* scratch)
+JSC_DEFINE_JIT_OPERATION(operationDebugPrintSpeculationFailure, void, (CallFrame* callFrame, void* debugInfoRaw, void* scratch))
 {
     VM& vm = callFrame->deprecatedVM();
     NativeCallFrameTracer tracer(vm, callFrame);

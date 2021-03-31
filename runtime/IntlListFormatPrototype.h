@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019 Apple Inc. All rights reserved.
+ * Copyright (C) 2020 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -23,41 +23,32 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "config.h"
-#include "ObjectToStringAdaptiveStructureWatchpoint.h"
+#pragma once
 
-#include "JSCellInlines.h"
-#include "StructureRareData.h"
+#include "JSObject.h"
 
 namespace JSC {
 
-ObjectToStringAdaptiveStructureWatchpoint::ObjectToStringAdaptiveStructureWatchpoint(const ObjectPropertyCondition& key, StructureRareData* structureRareData)
-    : Watchpoint(Watchpoint::Type::ObjectToStringAdaptiveStructure)
-    , m_structureRareData(structureRareData)
-    , m_key(key)
-{
-    RELEASE_ASSERT(key.watchingRequiresStructureTransitionWatchpoint());
-    RELEASE_ASSERT(!key.watchingRequiresReplacementWatchpoint());
-}
+class IntlListFormatPrototype final : public JSNonFinalObject {
+public:
+    using Base = JSNonFinalObject;
+    static constexpr unsigned StructureFlags = Base::StructureFlags | HasStaticPropertyTable;
 
-void ObjectToStringAdaptiveStructureWatchpoint::install(VM& vm)
-{
-    RELEASE_ASSERT(m_key.isWatchable());
-
-    m_key.object()->structure(vm)->addTransitionWatchpoint(this);
-}
-
-void ObjectToStringAdaptiveStructureWatchpoint::fireInternal(VM& vm, const FireDetail&)
-{
-    if (!m_structureRareData->isLive())
-        return;
-
-    if (m_key.isWatchable(PropertyCondition::EnsureWatchability)) {
-        install(vm);
-        return;
+    template<typename CellType, SubspaceAccess>
+    static IsoSubspace* subspaceFor(VM& vm)
+    {
+        STATIC_ASSERT_ISO_SUBSPACE_SHARABLE(IntlListFormatPrototype, Base);
+        return &vm.plainObjectSpace;
     }
 
-    m_structureRareData->clearObjectToStringValue();
-}
+    static IntlListFormatPrototype* create(VM&, Structure*);
+    static Structure* createStructure(VM&, JSGlobalObject*, JSValue);
+
+    DECLARE_INFO;
+
+private:
+    IntlListFormatPrototype(VM&, Structure*);
+    void finishCreation(VM&);
+};
 
 } // namespace JSC

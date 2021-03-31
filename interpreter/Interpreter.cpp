@@ -117,7 +117,7 @@ JSValue eval(JSGlobalObject* globalObject, CallFrame* callFrame, ECMAMode ecmaMo
     }
 
     EvalContextType evalContextType;
-    if (callerUnlinkedCodeBlock->parseMode() == SourceParseMode::InstanceFieldInitializerMode)
+    if (callerUnlinkedCodeBlock->parseMode() == SourceParseMode::ClassFieldInitializerMode)
         evalContextType = EvalContextType::InstanceFieldEvalContext;
     else if (isFunctionParseMode(callerUnlinkedCodeBlock->parseMode()))
         evalContextType = EvalContextType::FunctionEvalContext;
@@ -143,9 +143,10 @@ JSValue eval(JSGlobalObject* globalObject, CallFrame* callFrame, ECMAMode ecmaMo
             RETURN_IF_EXCEPTION(scope, JSValue());
         }
         
-        VariableEnvironment variablesUnderTDZ;
-        JSScope::collectClosureVariablesUnderTDZ(callerScopeChain, variablesUnderTDZ);
-        eval = DirectEvalExecutable::create(globalObject, makeSource(programSource, callerCodeBlock->source().provider()->sourceOrigin()), derivedContextType, callerUnlinkedCodeBlock->needsClassFieldInitializer(), isArrowFunctionContext, callerCodeBlock->ownerExecutable()->isInsideOrdinaryFunction(), evalContextType, &variablesUnderTDZ, ecmaMode);
+        TDZEnvironment variablesUnderTDZ;
+        VariableEnvironment privateNames;
+        JSScope::collectClosureVariablesUnderTDZ(callerScopeChain, variablesUnderTDZ, privateNames);
+        eval = DirectEvalExecutable::create(globalObject, makeSource(programSource, callerCodeBlock->source().provider()->sourceOrigin()), derivedContextType, callerUnlinkedCodeBlock->needsClassFieldInitializer(), isArrowFunctionContext, callerCodeBlock->ownerExecutable()->isInsideOrdinaryFunction(), evalContextType, &variablesUnderTDZ, &privateNames, ecmaMode);
         EXCEPTION_ASSERT(!!scope.exception() == !eval);
         if (!eval)
             return jsUndefined();
@@ -336,13 +337,14 @@ Interpreter::~Interpreter()
 #if !ENABLE(LLINT_EMBEDDED_OPCODE_ID) || ASSERT_ENABLED
 HashMap<Opcode, OpcodeID>& Interpreter::opcodeIDTable()
 {
-    static NeverDestroyed<HashMap<Opcode, OpcodeID>> opcodeIDTable;
+    static LazyNeverDestroyed<HashMap<Opcode, OpcodeID>> opcodeIDTable;
 
     static std::once_flag initializeKey;
     std::call_once(initializeKey, [&] {
+        opcodeIDTable.construct();
         const Opcode* opcodeTable = LLInt::opcodeMap();
         for (unsigned i = 0; i < NUMBER_OF_BYTECODE_IDS; ++i)
-            opcodeIDTable.get().add(opcodeTable[i], static_cast<OpcodeID>(i));
+            opcodeIDTable->add(opcodeTable[i], static_cast<OpcodeID>(i));
     });
 
     return opcodeIDTable;
@@ -1264,6 +1266,10 @@ NEVER_INLINE void Interpreter::debug(CallFrame* callFrame, DebugHookType debugHo
 {
     VM& vm = callFrame->deprecatedVM();
     auto scope = DECLARE_CATCH_SCOPE(vm);
+
+    if (UNLIKELY(Options::debuggerTriggersBreakpointException()) && debugHookType == DidReachDebuggerStatement)
+        WTFBreakpointTrap();
+
     Debugger* debugger = callFrame->lexicalGlobalObject(vm)->debugger();
     if (!debugger)
         return;

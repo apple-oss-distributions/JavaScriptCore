@@ -74,7 +74,7 @@ function every(callback /*, thisArg */)
     var length = @typedArrayLength(this);
     var thisArg = @argument(1);
 
-    if (typeof callback !== "function")
+    if (!@isCallable(callback))
         @throwTypeError("TypedArray.prototype.every callback must be a function");
 
     for (var i = 0; i < length; i++) {
@@ -91,14 +91,16 @@ function fill(value /* [, start [, end]] */)
 
     var length = @typedArrayLength(this);
 
-    var start = @argument(1);
-    var end = @argument(2);
+    var number = @toNumber(value);
 
-    start = @typedArrayClampArgumentToStartOrEnd(start, length, 0);
-    end = @typedArrayClampArgumentToStartOrEnd(end, length, length);
+    var start = @typedArrayClampArgumentToStartOrEnd(@argument(1), length, 0);
+    var end = @typedArrayClampArgumentToStartOrEnd(@argument(2), length, length);
+
+    if (@isDetached(this))
+        @throwTypeError("Underlying ArrayBuffer has been detached from the view");
 
     for (var i = start; i < end; i++)
-        this[i] = value;
+        this[i] = number;
     return this;
 }
 
@@ -108,7 +110,7 @@ function find(callback /* [, thisArg] */)
     var length = @typedArrayLength(this);
     var thisArg = @argument(1);
 
-    if (typeof callback !== "function")
+    if (!@isCallable(callback))
         @throwTypeError("TypedArray.prototype.find callback must be a function");
 
     for (var i = 0; i < length; i++) {
@@ -125,7 +127,7 @@ function findIndex(callback /* [, thisArg] */)
     var length = @typedArrayLength(this);
     var thisArg = @argument(1);
 
-    if (typeof callback !== "function")
+    if (!@isCallable(callback))
         @throwTypeError("TypedArray.prototype.findIndex callback must be a function");
 
     for (var i = 0; i < length; i++) {
@@ -141,7 +143,7 @@ function forEach(callback /* [, thisArg] */)
     var length = @typedArrayLength(this);
     var thisArg = @argument(1);
 
-    if (typeof callback !== "function")
+    if (!@isCallable(callback))
         @throwTypeError("TypedArray.prototype.forEach callback must be a function");
 
     for (var i = 0; i < length; i++)
@@ -155,7 +157,7 @@ function some(callback /* [, thisArg] */)
     var length = @typedArrayLength(this);
     var thisArg = @argument(1);
 
-    if (typeof callback !== "function")
+    if (!@isCallable(callback))
         @throwTypeError("TypedArray.prototype.some callback must be a function");
 
     for (var i = 0; i < length; i++) {
@@ -166,68 +168,85 @@ function some(callback /* [, thisArg] */)
     return false;
 }
 
-function sort(comparator)
+@globalPrivate
+function typedArrayElementCompare(array, a, b, comparator)
 {
-    // 22.2.3.25
     "use strict";
 
-    function min(a, b)
-    {
-        return a < b ? a : b;
-    }
+    var result = @toNumber(comparator(a, b));
 
-    function merge(dst, src, srcIndex, srcEnd, width, comparator)
-    {
-        var left = srcIndex;
-        var leftEnd = min(left + width, srcEnd);
-        var right = leftEnd;
-        var rightEnd = min(right + width, srcEnd);
+    if (@isDetached(array))
+        @throwTypeError("Underlying ArrayBuffer has been detached from the view");
 
-        for (var dstIndex = left; dstIndex < rightEnd; ++dstIndex) {
-            if (right < rightEnd) {
-                if (left >= leftEnd || comparator(src[right], src[left]) < 0) {
-                    dst[dstIndex] = src[right++];
-                    continue;
-                }
+    return result;
+}
+
+@globalPrivate
+function typedArrayMerge(array, dst, src, srcIndex, srcEnd, width, comparator)
+{
+    "use strict";
+
+    var left = srcIndex;
+    var leftEnd = @min(left + width, srcEnd);
+    var right = leftEnd;
+    var rightEnd = @min(right + width, srcEnd);
+
+    for (var dstIndex = left; dstIndex < rightEnd; ++dstIndex) {
+        if (right < rightEnd) {
+            if (left >= leftEnd || @typedArrayElementCompare(array, src[right], src[left], comparator) < 0) {
+                dst[dstIndex] = src[right++];
+                continue;
             }
-
-            dst[dstIndex] = src[left++];
         }
+
+        dst[dstIndex] = src[left++];
+    }
+}
+
+@globalPrivate
+function typedArrayMergeSort(array, valueCount, comparator)
+{
+    "use strict";
+
+    var buffer = @newArrayWithSize(valueCount);
+    var dst = buffer;
+    var src = array;
+
+    for (var width = 1; width < valueCount; width *= 2) {
+        for (var srcIndex = 0; srcIndex < valueCount; srcIndex += 2 * width)
+            @typedArrayMerge(array, dst, src, srcIndex, valueCount, width, comparator);
+
+        var tmp = src;
+        src = dst;
+        dst = tmp;
     }
 
-    function mergeSort(array, valueCount, comparator)
-    {
-        var buffer = [ ];
-        buffer.length = valueCount;
-
-        var dst = buffer;
-        var src = array;
-
-        for (var width = 1; width < valueCount; width *= 2) {
-            for (var srcIndex = 0; srcIndex < valueCount; srcIndex += 2 * width)
-                merge(dst, src, srcIndex, valueCount, width, comparator);
-
-            var tmp = src;
-            src = dst;
-            dst = tmp;
-        }
-
-        if (src != array) {
-            for(var i = 0; i < valueCount; i++)
-                array[i] = src[i];
-        }
+    if (src != array) {
+        for (var i = 0; i < valueCount; ++i)
+            array[i] = src[i];
     }
+}
+
+function sort(comparator)
+{
+    "use strict";
+
+    if (comparator !== @undefined && !@isCallable(comparator))
+        @throwTypeError("TypedArray.prototype.sort requires the comparator argument to be a function or undefined");
 
     var length = @typedArrayLength(this);
-
     if (length < 2)
         return;
 
-    if (typeof comparator == "function")
-        mergeSort(this, length, comparator);
-    else
+    // typedArraySort is not safe when the other thread is modifying content. So if |this| is SharedArrayBuffer,
+    // use JS-implemented sorting.
+    if (comparator !== @undefined || @isSharedTypedArrayView(this)) {
+        if (comparator === @undefined)
+            comparator = @typedArrayDefaultComparator;
+        @typedArrayMergeSort(this, length, comparator);
+    } else
         @typedArraySort(this);
-    
+
     return this;
 }
 
@@ -255,7 +274,7 @@ function reduce(callback /* [, initialValue] */)
 
     var length = @typedArrayLength(this);
 
-    if (typeof callback !== "function")
+    if (!@isCallable(callback))
         @throwTypeError("TypedArray.prototype.reduce callback must be a function");
 
     var argumentCount = @argumentCount();
@@ -281,7 +300,7 @@ function reduceRight(callback /* [, initialValue] */)
 
     var length = @typedArrayLength(this);
 
-    if (typeof callback !== "function")
+    if (!@isCallable(callback))
         @throwTypeError("TypedArray.prototype.reduceRight callback must be a function");
 
     var argumentCount = @argumentCount();
@@ -307,26 +326,15 @@ function map(callback /*, thisArg */)
 
     var length = @typedArrayLength(this);
 
-    if (typeof callback !== "function")
+    if (!@isCallable(callback))
         @throwTypeError("TypedArray.prototype.map callback must be a function");
 
     var thisArg = @argument(1);
 
-    // Do species construction
-    var constructor = this.constructor;
-    var result;
-    if (constructor === @undefined)
-        result = new (@typedArrayGetOriginalConstructor(this))(length);
-    else {
-        var speciesConstructor = constructor.@@species;
-        if (@isUndefinedOrNull(speciesConstructor))
-            result = new (@typedArrayGetOriginalConstructor(this))(length);
-        else {
-            result = new speciesConstructor(length);
-            // typedArrayLength throws if it doesn't get a view.
-            @typedArrayLength(result);
-        }
-    }
+    var constructor = @typedArraySpeciesConstructor(this);
+    var result = new constructor(length);
+    if (@typedArrayLength(result) < length)
+        @throwTypeError("TypedArray.prototype.map constructed typed array of insufficient length");
 
     for (var i = 0; i < length; i++) {
         var mappedValue = callback.@call(thisArg, this[i], i, this);
@@ -341,7 +349,7 @@ function filter(callback /*, thisArg */)
 
     var length = @typedArrayLength(this);
 
-    if (typeof callback !== "function")
+    if (!@isCallable(callback))
         @throwTypeError("TypedArray.prototype.filter callback must be a function");
 
     var thisArg = @argument(1);
@@ -350,26 +358,16 @@ function filter(callback /*, thisArg */)
     for (var i = 0; i < length; i++) {
         var value = this[i];
         if (callback.@call(thisArg, value, i, this))
-            kept.@push(value);
+            @arrayPush(kept, value);
     }
+    var length = kept.length;
 
-    var constructor = this.constructor;
-    var result;
-    var resultLength = kept.length;
-    if (constructor === @undefined)
-        result = new (@typedArrayGetOriginalConstructor(this))(resultLength);
-    else {
-        var speciesConstructor = constructor.@@species;
-        if (@isUndefinedOrNull(speciesConstructor))
-            result = new (@typedArrayGetOriginalConstructor(this))(resultLength);
-        else {
-            result = new speciesConstructor(resultLength);
-            // typedArrayLength throws if it doesn't get a view.
-            @typedArrayLength(result);
-        }
-    }
+    var constructor = @typedArraySpeciesConstructor(this);
+    var result = new constructor(length);
+    if (@typedArrayLength(result) < length)
+        @throwTypeError("TypedArray.prototype.filter constructed typed array of insufficient length");
 
-    for (var i = 0; i < kept.length; i++)
+    for (var i = 0; i < length; i++)
         result[i] = kept[i];
 
     return result;
@@ -384,9 +382,22 @@ function toLocaleString(/* locale, options */)
     if (length == 0)
         return "";
 
-    var string = this[0].toLocaleString(@argument(0), @argument(1));
+    var string = @toString(this[0].toLocaleString(@argument(0), @argument(1)));
     for (var i = 1; i < length; i++)
-        string += "," + this[i].toLocaleString(@argument(0), @argument(1));
+        string += "," + @toString(this[i].toLocaleString(@argument(0), @argument(1)));
 
     return string;
+}
+
+function at(index)
+{
+    "use strict";
+
+    var length = @typedArrayLength(this);
+
+    var k = @toInteger(index);
+    if (k < 0)
+        k += length;
+
+    return (k >= 0 && k < length) ? this[k] : @undefined;
 }

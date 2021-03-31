@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019 Apple Inc. All rights reserved.
+ * Copyright (C) 2020 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -25,29 +25,30 @@
 
 #pragma once
 
-#include "ObjectPropertyCondition.h"
-#include "PackedCellPtr.h"
-#include "StructureRareData.h"
-#include "Watchpoint.h"
+#include "JSObject.h"
 
 namespace JSC {
 
-class StructureRareData;
-
-class ObjectToStringAdaptiveStructureWatchpoint final : public Watchpoint {
+class IntlSegmentIteratorPrototype final : public JSNonFinalObject {
 public:
-    ObjectToStringAdaptiveStructureWatchpoint(const ObjectPropertyCondition&, StructureRareData*);
+    using Base = JSNonFinalObject;
+    static constexpr unsigned StructureFlags = Base::StructureFlags | HasStaticPropertyTable;
 
-    void install(VM&);
+    template<typename CellType, SubspaceAccess>
+    static IsoSubspace* subspaceFor(VM& vm)
+    {
+        STATIC_ASSERT_ISO_SUBSPACE_SHARABLE(IntlSegmentIteratorPrototype, Base);
+        return &vm.plainObjectSpace;
+    }
 
-    const ObjectPropertyCondition& key() const { return m_key; }
+    static IntlSegmentIteratorPrototype* create(VM&, Structure*);
+    static Structure* createStructure(VM&, JSGlobalObject*, JSValue);
 
-    void fireInternal(VM&, const FireDetail&);
-    
+    DECLARE_INFO;
+
 private:
-    // Own destructor may not be called. Keep members trivially destructible.
-    JSC_WATCHPOINT_FIELD(PackedCellPtr<StructureRareData>, m_structureRareData);
-    JSC_WATCHPOINT_FIELD(ObjectPropertyCondition, m_key);
+    IntlSegmentIteratorPrototype(VM&, Structure*);
+    void finishCreation(VM&);
 };
 
-}
+} // namespace JSC

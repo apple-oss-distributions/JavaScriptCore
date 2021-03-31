@@ -75,7 +75,7 @@ class StructureStubInfo {
     WTF_MAKE_NONCOPYABLE(StructureStubInfo);
     WTF_MAKE_FAST_ALLOCATED;
 public:
-    StructureStubInfo(AccessType);
+    StructureStubInfo(AccessType, CodeOrigin);
     ~StructureStubInfo();
 
     void initGetByIdSelf(const ConcurrentJSLockerBase&, CodeBlock*, Structure* baseObjectStructure, PropertyOffset, CacheableIdentifier);
@@ -404,6 +404,8 @@ inline auto appropriateOptimizingGetByIdFunction(AccessType type) -> decltype(&o
         return operationTryGetByIdOptimize;
     case AccessType::GetByIdDirect:
         return operationGetByIdDirectOptimize;
+    case AccessType::GetPrivateName:
+        return operationGetPrivateNameByIdOptimize;
     case AccessType::GetByIdWithThis:
     default:
         ASSERT_NOT_REACHED();
@@ -420,6 +422,8 @@ inline auto appropriateGenericGetByIdFunction(AccessType type) -> decltype(&oper
         return operationTryGetByIdGeneric;
     case AccessType::GetByIdDirect:
         return operationGetByIdDirectGeneric;
+    case AccessType::GetPrivateName:
+        return operationGetPrivateNameByIdGeneric;
     case AccessType::GetByIdWithThis:
     default:
         ASSERT_NOT_REACHED();
